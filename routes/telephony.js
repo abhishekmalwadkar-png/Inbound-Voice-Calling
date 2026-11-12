@@ -74,7 +74,7 @@ function twimlHandler(name, handler) {
         sendTwiml(res, xml);
       } catch (err) {
         console.error(`[twilio] ${name} failed: ${err.stack || err.message}`);
-        sendTwiml(res, tw.transferToAgent({ prompts: [conversation.PROMPTS.systemError, conversation.PROMPTS.transfer] }));
+        sendTwiml(res, conversation.errorTwiml());
       }
     });
   };

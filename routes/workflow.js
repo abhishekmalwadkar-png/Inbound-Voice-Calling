@@ -54,11 +54,12 @@ function asyncRoute(handler) {
         if (session) session.overrides = merged;
       });
     } catch (err) {
+      if (err.status === 400) return res.status(400).json({ success: false, error: err.message });
       console.error(`[workflow] ${req.method} ${req.originalUrl} failed: ${err.stack || err.message}`);
       res.status(500).json({
         success: false,
         error: 'Internal error while processing the workflow request.',
-        twiml: tw.transferToAgent({ prompts: [conversation.PROMPTS.systemError, conversation.PROMPTS.transfer] }),
+        twiml: conversation.errorTwiml(),
       });
     }
   };
@@ -71,7 +72,7 @@ async function findConsignmentOr404(res, consignmentId) {
       success: false,
       error: `Consignment ${consignmentId} not found.`,
       twiml: tw.gather({
-        prompts: ['Sorry, we could not find that consignment.', conversation.PROMPTS.verify],
+        prompts: ['Sorry, we could not find that consignment.', conversation.PROMPTS.askConsignment],
         action: conversation.ROUTES.verify,
         finishOnKey: '#',
       }),
@@ -197,17 +198,16 @@ router.post(
       return badRequest(res, '"reason" must be 1-100 characters: letters, digits, underscore, dot or hyphen.');
     }
     const s = ctx.settings();
-    if (!s.agentNumber) {
-      return badRequest(res, 'Pass "agentNumber" (or "destination") in the body, or set LIVE_AGENT_PHONE_NUMBER in .env.');
-    }
     const { callSid } = req.body;
+    // PPT slide 18: with no agent configured the TwiML apologises and ends the call (action END_CALL).
+    const connected = conversation.agentConfigured();
     const twiml = await conversation.workflowTransfer({ callSid, callerPhone, reason, message: req.body.message });
 
     res.json({
       success: true,
       callSid,
-      action: 'DIAL_AGENT',
-      destination: s.agentNumber,
+      action: connected ? 'DIAL_AGENT' : 'END_CALL',
+      destination: connected ? s.agentNumber : null,
       callerId: tw.isE164(s.callerId) ? s.callerId : null,
       reason,
       dialTimeoutSeconds: s.dialTimeoutSeconds,

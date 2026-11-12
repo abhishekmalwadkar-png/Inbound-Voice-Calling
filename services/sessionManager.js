@@ -11,7 +11,6 @@ const config = require('../config');
 
 const STAGES = Object.freeze({
   NEW: 'NEW',
-  DISAMBIGUATE: 'DISAMBIGUATE',
   VERIFY: 'VERIFY',
   MAIN_MENU: 'MAIN_MENU',
   FOLLOW_UP: 'FOLLOW_UP',
@@ -37,7 +36,11 @@ class SessionManager {
       candidates: [],
       pendingValidationMethod: null,
       validationMethod: null,
-      verifyAttempts: 0,
+      verified: false,
+      verifyStep: null,
+      pendingConsignment: null,
+      verifyFailures: 0,
+      verifyEntries: 0,
       unclearCount: 0,
       silenceCount: 0,
       intents: [],

@@ -279,6 +279,14 @@
     .badge.abandoned { background: #e9f8f2; border-color: #bfe9d8; }
     .badge.abandoned::before { background: var(--series-3); }
 
+    /* Verification status (status colours, always with icon + label) */
+    .verify { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px 3px 7px; border-radius: 999px; font-size: 12px; font-weight: 700; border: 1px solid; white-space: nowrap; }
+    .verify .ico { font-size: 11px; line-height: 1; }
+    .verify.VERIFIED { color: #1d7a3e; background: #ebf7ef; border-color: #bfe4cb; }
+    .verify.NOT_VERIFIED { color: #b42318; background: #fdeeec; border-color: #f6c6c0; }
+    .verify.PENDING { color: #8a5a00; background: #fff6dc; border-color: #f3dc9c; }
+    .verify-attempts { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+
     /* ---------------------------------------------------------------- Pagination */
     .table-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; color: var(--text-2); font-size: 12.5px; }
     .pager { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
@@ -295,12 +303,96 @@
     .page-size select { width: auto; padding: 6px 10px; }
 
     /* ---------------------------------------------------------------- Logs filters */
-    .filters { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(140px, 1fr)) auto; gap: 12px; align-items: end; }
+    .filters { display: grid; grid-template-columns: minmax(200px, 2fr) repeat(5, minmax(130px, 1fr)) auto; gap: 12px; align-items: end; }
     .filters .actions { display: flex; gap: 8px; }
+
+
+    /* ---------------------------------------------------------------- Deliveries */
+    .status-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; }
+    .status-tile {
+      text-align: left; cursor: pointer; padding: 16px 18px; border-radius: var(--radius);
+      background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-sm); color: var(--text);
+    }
+    .status-tile .st-label { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+    .status-tile .st-dot { width: 10px; height: 10px; border-radius: 3px; background: var(--neutral-mark); flex: none; }
+    .status-tile .st-count { display: block; margin-top: 8px; font-size: 28px; font-weight: 750; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .status-tile .st-sub { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); }
+    .status-tile[aria-pressed="true"] { border-color: var(--orange-500); box-shadow: 0 0 0 3px rgba(249, 115, 22, .16), var(--shadow-sm); background: linear-gradient(180deg, #fff, var(--orange-50)); }
+    .st-ALL .st-dot { background: var(--grad); }
+    .st-DISPATCHED .st-dot { background: var(--series-1); }
+    .st-IN_TRANSIT .st-dot { background: var(--series-2); }
+    .st-OUT_FOR_DELIVERY .st-dot { background: var(--series-3); }
+    .st-DELIVERY_ATTEMPTED .st-dot { background: var(--series-4); }
+    .st-DELIVERED .st-dot { background: var(--series-5); }
+
+    .segmented { display: inline-flex; padding: 3px; gap: 3px; border-radius: 11px; background: var(--surface-2); border: 1px solid var(--border); }
+    .segmented button {
+      display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; cursor: pointer; white-space: nowrap;
+      padding: 7px 14px; border-radius: 8px; font-weight: 600; font-size: 13px; color: var(--text-2); transition: background .2s, color .2s, box-shadow .2s;
+    }
+    .segmented button svg { width: 15px; height: 15px; }
+    .segmented button:hover { color: var(--orange-700); }
+    .segmented button[aria-pressed="true"] { background: var(--surface); color: var(--orange-700); box-shadow: 0 2px 8px -2px rgba(232, 89, 12, .3); }
+    .segmented .count { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--orange-100); color: var(--orange-700); }
+
+    .del-filters { display: grid; grid-template-columns: minmax(240px, 2fr) repeat(3, minmax(160px, 1fr)) auto; gap: 12px; align-items: end; }
+    .del-filters .actions { display: flex; gap: 8px; }
+
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 999px;
+      font-size: 12px; font-weight: 600; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    }
+    .status-badge::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: var(--neutral-mark); }
+    .status-badge.DISPATCHED::before { background: var(--series-1); }
+    .status-badge.IN_TRANSIT::before { background: var(--series-2); }
+    .status-badge.OUT_FOR_DELIVERY::before { background: var(--series-3); }
+    .status-badge.DELIVERY_ATTEMPTED::before { background: var(--series-4); }
+    .status-badge.DELIVERED::before { background: var(--series-5); }
+    .item-cell { display: flex; align-items: center; gap: 10px; }
+    .item-icon { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: var(--orange-50); color: var(--orange-600); border: 1px solid var(--orange-100); flex: none; }
+    .item-icon svg { width: 16px; height: 16px; }
+    .item-cell strong { display: block; font-weight: 600; font-size: 13px; }
+    .item-cell span { display: block; font-size: 12px; color: var(--muted); }
+    .inactive-tag { margin-left: 6px; font-size: 10.5px; font-weight: 700; color: var(--muted); border: 1px solid var(--border-strong); border-radius: 6px; padding: 0 5px; }
+    tr.clickable { cursor: pointer; }
+    .fail-text { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+
+    /* Detail drawer */
+    .drawer-backdrop { position: fixed; inset: 0; background: rgba(42, 31, 23, .28); backdrop-filter: blur(2px); z-index: 40; opacity: 0; pointer-events: none; transition: opacity .25s; }
+    .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+    .drawer {
+      position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100vw); z-index: 41; background: var(--surface);
+      box-shadow: -24px 0 60px -30px rgba(194, 65, 12, .45); border-left: 1px solid var(--border);
+      transform: translateX(100%); transition: transform .35s var(--ease); display: flex; flex-direction: column;
+    }
+    .drawer.open { transform: none; }
+    .drawer-head { padding: 20px 22px; background: var(--grad); color: #fff; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .drawer-head h3 { margin: 0; font-size: 18px; font-weight: 750; }
+    .drawer-head p { margin: 3px 0 0; font-size: 13px; opacity: .92; }
+    .drawer-close { border: 0; background: rgba(255, 255, 255, .2); color: #fff; width: 34px; height: 34px; border-radius: 10px; cursor: pointer; font-size: 18px; line-height: 1; }
+    .drawer-close:hover { background: rgba(255, 255, 255, .32); }
+    .drawer-body { padding: 20px 22px 28px; overflow-y: auto; display: grid; gap: 22px; align-content: start; }
+    .drawer h4 { margin: 0 0 10px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--orange-700); }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .info-grid div { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; }
+    .info-grid dt { font-size: 11.5px; color: var(--muted); font-weight: 600; }
+    .info-grid dd { margin: 2px 0 0; font-weight: 600; font-size: 13.5px; }
+    .timeline { list-style: none; margin: 0; padding: 0 0 0 18px; border-left: 2px solid var(--orange-100); display: grid; gap: 14px; }
+    .timeline li { position: relative; }
+    .timeline li::before { content: ""; position: absolute; left: -25px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 3px solid var(--series-4); }
+    .timeline .when { font-size: 12px; color: var(--muted); font-weight: 600; }
+    .timeline .what { font-weight: 600; margin-top: 1px; }
+    .timeline .note { font-size: 12.5px; color: var(--text-2); margin-top: 2px; }
+    .drawer-empty { color: var(--muted); font-size: 13px; padding: 12px; background: var(--surface-2); border-radius: 10px; border: 1px dashed var(--border-strong); }
+    .mini-calls { display: grid; gap: 8px; }
+    .mini-call { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
+    .mini-call .meta { color: var(--muted); font-size: 12px; }
 
     /* ---------------------------------------------------------------- Responsive */
     @media (max-width: 1280px) {
-      .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .kpis, .status-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .del-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .del-filters .search { grid-column: span 3; }
       .filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .filters .search { grid-column: 1 / -1; }
     }
@@ -311,6 +403,10 @@
     @media (max-width: 680px) {
       .topbar, main { padding-left: 16px; padding-right: 16px; }
       .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+      .status-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .del-filters { grid-template-columns: 1fr 1fr; }
+      .del-filters .search { grid-column: span 2; }
+      .info-grid { grid-template-columns: 1fr; }
       .charts { grid-template-columns: 1fr; }
       .filters { grid-template-columns: 1fr 1fr; }
       .kpi .value { font-size: 24px; }
@@ -335,6 +431,10 @@
       <button class="tab" role="tab" id="tabBtnHome" aria-controls="tabHome" aria-selected="true" data-tab="home">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2h-4v-7H9v7H5a2 2 0 0 1-2-2z"/></svg>
         Home
+      </button>
+      <button class="tab" role="tab" id="tabBtnDeliveries" aria-controls="tabDeliveries" aria-selected="false" data-tab="deliveries">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><rect x="8" y="11" width="8" height="7" rx="1"/></svg>
+        SIM Deliveries
       </button>
       <button class="tab" role="tab" id="tabBtnLogs" aria-controls="tabLogs" aria-selected="false" data-tab="logs">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
@@ -389,7 +489,7 @@
         <div class="top"><span class="label">Validation accuracy</span>
           <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span></div>
         <div class="value" id="kpiValidation">&ndash;</div>
-        <div class="sub">Callers verified successfully</div>
+        <div class="sub" id="kpiValidationSub">Callers verified successfully</div>
       </div>
       <div class="card kpi float reveal" style="animation-delay:.23s">
         <div class="top"><span class="label">Escalation rate</span>
@@ -451,16 +551,101 @@
           <table>
             <thead>
               <tr>
-                <th>Time</th><th>Caller</th><th>Consignment</th><th>Intent</th><th>Duration</th><th>Disposition</th>
+                <th>Time</th><th>Caller</th><th>Verified</th><th>Consignment</th><th>Intent</th><th>Duration</th><th>Disposition</th>
               </tr>
             </thead>
-            <tbody id="auditBody"><tr class="empty-row"><td colspan="6">Loading&hellip;</td></tr></tbody>
+            <tbody id="auditBody"><tr class="empty-row"><td colspan="7">Loading&hellip;</td></tr></tbody>
           </table>
         </div>
         <div class="table-foot">
           <span id="auditSummary">&nbsp;</span>
           <nav class="pager" id="auditPager" aria-label="Live audit log pages"></nav>
         </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ================================================================ DELIVERIES -->
+  <main id="tabDeliveries" role="tabpanel" aria-labelledby="tabBtnDeliveries" hidden>
+    <div class="page-head reveal">
+      <div>
+        <h2>SIM Deliveries</h2>
+        <p>SIM card consignments from PostgreSQL, updated live. Click a row for its attempt history and calls.</p>
+      </div>
+      <button type="button" class="btn primary" id="btnDeliveriesCsv" title="Download all SIM consignments matching the current filters">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        Download CSV
+      </button>
+    </div>
+
+    <div class="section-label">Status</div>
+    <section class="status-tiles" id="statusTiles" aria-label="Consignments by status"></section>
+
+    <section class="card reveal" aria-label="Delivery filters" style="animation-delay:.05s">
+      <form class="del-filters" id="deliveryFilters">
+        <div class="search">
+          <label class="field-label" for="dSearch">Search</label>
+          <input class="input" type="text" id="dSearch" placeholder="Consignment ID, operator, location&hellip;" autocomplete="off" />
+        </div>
+        <div>
+          <label class="field-label" for="dIssuer">Operator</label>
+          <select class="input" id="dIssuer"><option value="">All operators</option></select>
+        </div>
+        <div>
+          <label class="field-label" for="dStatus">Status</label>
+          <select class="input" id="dStatus">
+            <option value="">All statuses</option>
+            <option value="DISPATCHED">Dispatched</option>
+            <option value="IN_TRANSIT">In Transit</option>
+            <option value="OUT_FOR_DELIVERY">Out for Delivery</option>
+            <option value="DELIVERY_ATTEMPTED">Delivery Attempted</option>
+            <option value="DELIVERED">Delivered</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label" for="dActive">Records</label>
+          <select class="input" id="dActive">
+            <option value="active">Active only</option>
+            <option value="inactive">Inactive only</option>
+            <option value="all">All records</option>
+          </select>
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn primary">Apply</button>
+          <button type="button" class="btn" id="btnResetDeliveries">Reset</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card reveal" aria-label="Consignments" style="animation-delay:.1s">
+      <div class="table-wrap" style="max-height:62vh">
+        <table>
+          <thead>
+            <tr id="deliveriesHead">
+              <th class="sortable" data-sort="consignmentId" aria-sort="none">Consignment<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="issuer" aria-sort="none">Operator / SIM<span class="arrow">&#9662;</span></th>
+              <th>Customer</th>
+              <th class="sortable" data-sort="status" aria-sort="ascending">Status<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="expectedDeliveryDate" aria-sort="none">Expected delivery<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="lastLocation" aria-sort="none">Last location<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="attemptCount" aria-sort="none">Attempts<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="lastAttemptAt" aria-sort="none">Last attempt<span class="arrow">&#9662;</span></th>
+              <th>Failure reason</th>
+              <th>Next attempt</th>
+            </tr>
+          </thead>
+          <tbody id="deliveriesBody"><tr class="empty-row"><td colspan="10">Loading&hellip;</td></tr></tbody>
+        </table>
+      </div>
+      <div class="table-foot">
+        <div class="page-size">
+          <span id="deliveriesSummary">&nbsp;</span>
+          <label for="deliveriesPageSize" class="field-label" style="margin:0 0 0 10px">Rows per page</label>
+          <select class="input" id="deliveriesPageSize">
+            <option>10</option><option selected>25</option><option>50</option><option>100</option><option>200</option>
+          </select>
+        </div>
+        <nav class="pager" id="deliveriesPager" aria-label="Consignment pages"></nav>
       </div>
     </section>
   </main>
@@ -509,11 +694,19 @@
           <select class="input" id="fValidation">
             <option value="">All methods</option>
             <option value="ANI">ANI (single)</option>
-            <option value="ANI_MULTI">ANI (multiple)</option>
             <option value="CONSIGNMENT">Consignment #</option>
             <option value="DOB">Date of birth</option>
             <option value="FAILED">Failed</option>
             <option value="WORKFLOW">Workflow</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label" for="fVerification">Verification</label>
+          <select class="input" id="fVerification">
+            <option value="">All callers</option>
+            <option value="VERIFIED">Verified</option>
+            <option value="NOT_VERIFIED">Not verified</option>
+            <option value="PENDING">Pending</option>
           </select>
         </div>
         <div class="actions">
@@ -532,6 +725,7 @@
               <th class="sortable" data-sort="updatedAt" aria-sort="descending">Last update<span class="arrow">&#9662;</span></th>
               <th class="sortable" data-sort="callSid" aria-sort="none">Call SID<span class="arrow">&#9662;</span></th>
               <th class="sortable" data-sort="callerPhone" aria-sort="none">Caller<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="verificationStatus" aria-sort="none">Verification<span class="arrow">&#9662;</span></th>
               <th class="sortable" data-sort="consignmentId" aria-sort="none">Consignment<span class="arrow">&#9662;</span></th>
               <th class="sortable" data-sort="validationMethod" aria-sort="none">Validation<span class="arrow">&#9662;</span></th>
               <th class="sortable" data-sort="intentDetected" aria-sort="none">Intent<span class="arrow">&#9662;</span></th>
@@ -540,7 +734,7 @@
               <th class="sortable" data-sort="escalationReason" aria-sort="none">Escalation reason<span class="arrow">&#9662;</span></th>
             </tr>
           </thead>
-          <tbody id="logsBody"><tr class="empty-row"><td colspan="10">Loading&hellip;</td></tr></tbody>
+          <tbody id="logsBody"><tr class="empty-row"><td colspan="11">Loading&hellip;</td></tr></tbody>
         </table>
       </div>
       <div class="table-foot">
@@ -555,6 +749,16 @@
       </div>
     </section>
   </main>
+
+  <!-- ================================================================ CONSIGNMENT DETAIL DRAWER -->
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" aria-hidden="true">
+    <div class="drawer-head">
+      <div><h3 id="drawerTitle">Consignment</h3><p id="drawerSubtitle">&nbsp;</p></div>
+      <button type="button" class="drawer-close" id="drawerClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+  </aside>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
   <script src="dashboard.js"></script>

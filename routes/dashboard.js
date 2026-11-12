@@ -5,6 +5,7 @@ const config = require('../config');
 const db = require('../services/databaseService');
 const sessions = require('../services/sessionManager');
 const realtime = require('../services/realtimeService');
+const rb = require('../services/responseBuilder');
 const { maskPhone, statusLabel } = require('../utils/formatters');
 
 const router = express.Router();
@@ -32,6 +33,9 @@ router.get('/metrics', async (req, res) => {
         containmentRate: pct(contained, m.completed_calls),
         averageHandlingTimeSeconds: m.aht_seconds,
         validationAccuracy: pct(m.validated, m.validation_attempts),
+        verifiedCalls: m.validated,
+        notVerifiedCalls: m.not_verified,
+        pendingVerification: m.verification_pending,
         escalationRate: pct(m.escalated, m.completed_calls),
         estimatedCostSavingsInr: Math.round(contained * savingPerCall),
         costAssumptions: {
@@ -61,7 +65,10 @@ function presentAudit(r) {
     callSid: r.call_sid,
     callerPhone: maskPhone(r.caller_phone),
     consignmentId: r.consignment_id,
-    validationMethod: r.validation_method,
+    // 'ANI_MATCH' (written by some external tools) is the same as the app's 'ANI'.
+    validationMethod: r.validation_method === 'ANI_MATCH' ? 'ANI' : r.validation_method,
+    verificationStatus: r.verification_status || null,
+    verificationAttempts: r.verification_attempts !== undefined && r.verification_attempts !== null ? r.verification_attempts : null,
     intentDetected: r.intent_detected,
     durationSeconds: r.duration_seconds,
     disposition: r.disposition,
@@ -72,7 +79,7 @@ function presentAudit(r) {
 }
 
 function filtersFrom(q) {
-  return { from: q.from, to: q.to, disposition: q.disposition, validation: q.validation, search: q.q, sort: q.sort, dir: q.dir };
+  return { from: q.from, to: q.to, disposition: q.disposition, validation: q.validation, verification: q.verification, search: q.q, sort: q.sort, dir: q.dir };
 }
 
 // GET /api/dashboard/audit-logs?limit=25&offset=0&from=YYYY-MM-DD&to=YYYY-MM-DD&disposition=&validation=&q=
@@ -91,6 +98,8 @@ const CSV_COLUMNS = [
   ['Call SID', 'callSid'],
   ['Caller Phone (masked)', 'callerPhone'],
   ['Consignment ID', 'consignmentId'],
+  ['Verification', 'verificationStatus'],
+  ['Verification Attempts', 'verificationAttempts'],
   ['Validation Method', 'validationMethod'],
   ['Intent Detected', 'intentDetected'],
   ['Duration (s)', 'durationSeconds'],
@@ -121,6 +130,119 @@ router.get('/audit-logs/export.csv', async (req, res) => {
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', `attachment; filename="ccd-call-audit-${stamp}.csv"`);
     res.send(`﻿${lines.join('\r\n')}\r\n`); // BOM so Excel opens UTF-8 correctly
+  } catch (err) {
+    res.status(503).json({ error: 'Database unavailable', detail: err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Deliveries (consignments + delivery attempts)
+// -----------------------------------------------------------------------------
+
+function consignmentFilters(q) {
+  return {
+    search: q.q,
+    status: q.status,
+    kind: ['SIM', 'CARD'].includes(q.kind) ? q.kind : undefined,
+    issuer: q.issuer,
+    active: ['active', 'inactive', 'all'].includes(q.active) ? q.active : 'active',
+    sort: q.sort,
+    dir: q.dir,
+  };
+}
+
+/** Masked, customer-safe view. Never includes DOB; phone masked; card/SIM number last 4 only. */
+function presentConsignment(r) {
+  const view = rb.toPublicConsignment(r);
+  return {
+    ...view,
+    customerPhone: maskPhone(r.customer_phone),
+    attemptCount: r.attempt_count !== undefined ? r.attempt_count : undefined,
+    lastAttemptAt: r.last_attempt_at || null,
+    lastFailureReasonCode: r.last_failure_reason || null,
+    lastFailureReason: r.last_failure_reason ? rb.plainFailureReason(r.last_failure_reason) : null,
+    nextAttemptDate: r.next_attempt_date || null,
+    createdAt: r.created_at,
+  };
+}
+
+// GET /api/dashboard/consignments/summary?kind=&issuer=&active=&q=
+router.get('/consignments/summary', async (req, res) => {
+  try {
+    const s = await db.getConsignmentSummary(consignmentFilters(req.query));
+    const counts = Object.fromEntries(s.statuses.map((r) => [r.status, r.count]));
+    res.json({
+      total: s.statuses.reduce((n, r) => n + r.count, 0),
+      statuses: db.CONSIGNMENT_STATUSES.map((status) => ({ status, label: statusLabel(status), count: counts[status] || 0 })),
+      issuers: s.issuers,
+      activeByKind: Object.fromEntries(s.activeByKind.map((r) => [r.kind, r.count])),
+    });
+  } catch (err) {
+    res.status(503).json({ error: 'Database unavailable', detail: err.message });
+  }
+});
+
+// GET /api/dashboard/consignments?limit&offset&q&status&kind=CARD|SIM&issuer&active=active|inactive|all&sort&dir
+router.get('/consignments', async (req, res) => {
+  try {
+    const page = await db.getConsignments({ limit: req.query.limit, offset: req.query.offset, ...consignmentFilters(req.query) });
+    res.json({ total: page.total, limit: page.limit, offset: page.offset, rows: page.rows.map(presentConsignment) });
+  } catch (err) {
+    res.status(503).json({ error: 'Database unavailable', detail: err.message });
+  }
+});
+
+const CONSIGNMENT_CSV_COLUMNS = [
+  ['Consignment ID', 'consignmentId'],
+  ['Issuer', 'issuer'],
+  ['Item', 'itemLabel'],
+  ['Number (last 4)', 'last4'],
+  ['Customer Phone (masked)', 'customerPhone'],
+  ['Status', 'statusLabel'],
+  ['Expected Delivery', 'expectedDeliveryDate'],
+  ['Last Location', 'lastLocation'],
+  ['Attempts', 'attemptCount'],
+  ['Last Attempt', 'lastAttemptAt'],
+  ['Last Failure Reason', 'lastFailureReason'],
+  ['Next Attempt', 'nextAttemptDate'],
+  ['Active', 'isActive'],
+  ['Created At', 'createdAt'],
+];
+
+// GET /api/dashboard/consignments/export.csv  (same filters, up to 50,000 rows)
+router.get('/consignments/export.csv', async (req, res) => {
+  try {
+    const page = await db.getConsignments({ limit: 50000, offset: 0, ...consignmentFilters(req.query) }, { maxLimit: 50000 });
+    const lines = [CONSIGNMENT_CSV_COLUMNS.map(([h]) => csvCell(h)).join(',')];
+    page.rows.map(presentConsignment).forEach((r) => {
+      const row = { ...r, customerPhone: r.customerPhone ? String(r.customerPhone).replace(/^\+(?=[\d*]+$)/, '') : r.customerPhone, isActive: r.isActive ? 'Yes' : 'No' };
+      lines.push(CONSIGNMENT_CSV_COLUMNS.map(([, key]) => csvCell(row[key])).join(','));
+    });
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 13);
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="ccd-${req.query.kind === 'SIM' ? 'sim-' : ''}deliveries-${stamp}.csv"`);
+    res.send(`﻿${lines.join('\r\n')}\r\n`);
+  } catch (err) {
+    res.status(503).json({ error: 'Database unavailable', detail: err.message });
+  }
+});
+
+// GET /api/dashboard/consignments/:id  -> consignment + attempt history + calls about it
+router.get('/consignments/:id', async (req, res) => {
+  try {
+    const detail = await db.getConsignmentDetail(req.params.id);
+    if (!detail) return res.status(404).json({ error: `Consignment ${req.params.id} not found` });
+    res.json({
+      consignment: presentConsignment(detail.consignment),
+      attempts: detail.attempts.map((a) => ({
+        attemptTimestamp: a.attempt_timestamp,
+        failureReasonCode: a.failure_reason,
+        failureReason: rb.plainFailureReason(a.failure_reason),
+        courierNotes: a.courier_notes || null,
+        nextAttemptDate: a.next_attempt_date || null,
+      })),
+      calls: detail.calls.map(presentAudit),
+    });
   } catch (err) {
     res.status(503).json({ error: 'Database unavailable', detail: err.message });
   }

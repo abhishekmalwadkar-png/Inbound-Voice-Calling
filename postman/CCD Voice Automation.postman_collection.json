@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "80545996-8ab5-4027-a806-2f905add430c",
+    "_postman_id": "7df33458-9fd8-4390-80c2-d2da5250ca8d",
     "name": "CCD Voice Automation - Utility Service",
     "description": "All endpoints of the CCD (Card & Consignment Delivery) inbound voice bot utility service.\n\n**Folders**\n0. Health & dashboard auth\n1. Workflow APIs for AutomationEdge (JSON + `twiml`)\n2. Twilio webhooks, simulated with form-encoded Twilio fields\n3. Twilio REST call management\n4. Dashboard APIs (login first)\n\nEvery value is a variable. Import **CCD Voice - Local.postman_environment.json** and set `dashboardPassword` there.\nSeed data comes from `db/seed.sql` (`npm run db:init`).\n\n**Optional call settings** (any request; .env is the fallback):\n`voice`, `language`, `agentNumber` (alias `destination`), `callerId`, `dialTimeout`, `gatherTimeout`,\n`verifyTimeout`, `confidenceThreshold`, `deliveryWindow`, `baseUrl`, `menuActionUrl`, `verifyActionUrl`, `dialStatusUrl`.\nSettings sent with a `callSid` are remembered for the rest of that call.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -373,7 +373,7 @@
                     "validate-caller"
                   ]
                 },
-                "description": "Seed number with two active consignments: expect `matchType = MULTIPLE` and a \"Press 1 / Press 2\" menu.",
+                "description": "Seed number with two active consignments: expect `matchType = MULTIPLE` and a prompt for the consignment number (secondary verification, PPT slide 16).",
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"callerPhone\": \"{{multiConsignmentPhone}}\",\n  \"callSid\": \"{{callSid}}\"\n}",
@@ -421,7 +421,7 @@
                     "validate-caller"
                   ]
                 },
-                "description": "Unrecognised number: expect `matchType = NONE` and a prompt for consignment number or DOB.",
+                "description": "Unrecognised number: expect `matchType = NONE` and a prompt for the consignment number.",
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"callerPhone\": \"{{unknownPhone}}\",\n  \"callSid\": \"{{callSid}}\"\n}",
@@ -486,7 +486,7 @@
           "name": "Verify Secondary ID",
           "item": [
             {
-              "name": "Verify - consignment number",
+              "name": "Verify - step 1: consignment number",
               "event": [
                 {
                   "listen": "test",
@@ -503,8 +503,8 @@
                       "  pm.expect(s).to.not.match(/\"dob\"/i);",
                       "  pm.expect(s).to.not.match(/\\b\\d{13,19}\\b/);",
                       "});",
-                      "pm.test('Verified', () => pm.expect(body.verified).to.eql(true));",
-                      "pm.test('Method CONSIGNMENT', () => pm.expect(body.validationMethod).to.eql('CONSIGNMENT'));"
+                      "pm.test('DOB check required', () => pm.expect(body.nextAction).to.eql('DOB_REQUIRED'));",
+                      "pm.test('Not verified yet', () => pm.expect(body.verified).to.eql(false));"
                     ]
                   }
                 }
@@ -528,10 +528,10 @@
                     "verify-secondary"
                   ]
                 },
-                "description": "Verifies with a consignment number (`CCD1008` or digits `1008`).\n\nReturns `verified`, `attemptCount`, `escalateToAgent`, `consignment` (masked), `twiml`.",
+                "description": "Step 1 (PPT slide 16): consignment number (`CCD1008` or digits `1008`).\n\n- Linked to `callerPhone` → `verified: true`.\n- Valid but not linked (this example: unknown caller) → `nextAction: DOB_REQUIRED` and TwiML asking for the date of birth.\n- Not found → failure (`RETRY_CONSIGNMENT`, or escalation on the 2nd failure).",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"callSid\": \"{{callSid}}\",\n  \"identifier\": \"{{verifyConsignmentId}}\",\n  \"type\": \"CONSIGNMENT\",\n  \"attemptCount\": 1,\n  \"callerPhone\": \"{{unknownPhone}}\"\n}",
+                  "raw": "{\n  \"callSid\": \"{{callSid}}\",\n  \"identifier\": \"{{verifyConsignmentId}}\",\n  \"type\": \"CONSIGNMENT\",\n  \"callerPhone\": \"{{unknownPhone}}\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -541,7 +541,7 @@
               }
             },
             {
-              "name": "Verify - date of birth",
+              "name": "Verify - step 2: date of birth",
               "event": [
                 {
                   "listen": "test",
@@ -576,10 +576,10 @@
                     "verify-secondary"
                   ]
                 },
-                "description": "Verifies with DOB in `DDMMYYYY` (also accepts `15/08/1990` or `15th August 1990`). A DOB alone must match exactly one customer.",
+                "description": "Step 2: date of birth (`DDMMYYYY`, `15/08/1990` or `15th August 1990`), checked against the consignment from step 1 (same `callSid`). Sending a DOB before step 1 returns 400.",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"callSid\": \"{{callSid}}\",\n  \"identifier\": \"{{dob}}\",\n  \"type\": \"DOB\",\n  \"attemptCount\": 1,\n  \"callerPhone\": \"{{unknownPhone}}\"\n}",
+                  "raw": "{\n  \"callSid\": \"{{callSid}}\",\n  \"identifier\": \"{{dob}}\",\n  \"type\": \"DOB\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -624,7 +624,7 @@
                     "verify-secondary"
                   ]
                 },
-                "description": "First failure: `verified=false`, `escalateToAgent=false`, `nextAction=RETRY_VERIFICATION`, TwiML re-prompts.",
+                "description": "First failure: `verified=false`, `escalateToAgent=false`, `nextAction=RETRY_CONSIGNMENT` (or `RETRY_DOB`), TwiML re-prompts.",
                 "body": {
                   "mode": "raw",
                   "raw": "{\n  \"callSid\": \"{{callSid}}\",\n  \"identifier\": \"{{invalidIdentifier}}\",\n  \"type\": \"AUTO\",\n  \"attemptCount\": 1\n}",
@@ -1430,7 +1430,7 @@
                 "verify-input"
               ]
             },
-            "description": "Gather action for secondary verification. Send `Digits` (keypad) or `SpeechResult` (spoken). Two failures escalate to an agent."
+            "description": "Gather action for secondary verification. First the consignment number; if it is not linked to the calling number the TwiML asks for the date of birth (next request). Send `Digits` (keypad) or `SpeechResult` (spoken). Two failures escalate to an agent."
           }
         },
         {

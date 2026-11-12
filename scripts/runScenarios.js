@@ -128,26 +128,31 @@ async function main() {
     ])
   );
 
-  await scenario(6, 'Unknown caller -> consignment number -> verified & resolved', () =>
+  // PPT slide 16: unknown number -> consignment number; not linked to the caller -> DOB check follows.
+  await scenario(6, 'Unknown caller -> consignment number -> DOB check -> verified & resolved', () =>
     callFlow('+919999900006', [
-      ['inbound-call', {}, [/could not find a delivery/, /consignment tracking number/, /verify-input/]],
-      ['verify-input', { Digits: '1008' }, [/details have been verified/, /Kotak Mahindra Bank credit card ending in 2 4 6 8/]],
+      ['inbound-call', {}, [/could not automatically match your phone number/, /consignment tracking number/, /verify-input/]],
+      ['verify-input', { Digits: '1008' }, [/date of birth/, /verify-input/]],
+      ['verify-input', { Digits: '15081990' }, [/details have been verified/, /Kotak Mahindra Bank credit card ending in 2 4 6 8/]],
       ['menu-selection', { Digits: '1' }, [/in transit/]],
     ])
   );
 
-  await scenario(7, 'Unknown caller -> DOB -> verified & resolved', () =>
+  await scenario(7, 'Unknown caller -> DOB challenge (wrong, re-asked, correct) -> verified', () =>
     callFlow('+919999900007', [
-      ['inbound-call', {}, [/date of birth/]],
+      ['inbound-call', {}, [/consignment tracking number/]],
+      ['verify-input', { SpeechResult: 'C C D 1 0 0 8' }, [/date of birth/]],
+      ['verify-input', { Digits: '01011990' }, [/could not match those details/, /date of birth/]],
       ['verify-input', { SpeechResult: '15th August 1990' }, [/details have been verified/, /Kotak Mahindra Bank/]],
       ['menu-selection', { Digits: '2' }, [/expected to be delivered/]],
     ])
   );
 
-  await scenario(8, 'Multiple consignments -> selection menu -> resolved', () =>
+  // PPT slide 16: a number linked to several consignments is asked for the consignment number.
+  await scenario(8, 'Multiple consignments -> consignment number linked to caller -> verified & resolved', () =>
     callFlow('+919800000006', [
-      ['inbound-call', {}, [/multiple deliveries/, /Press 1 for your Axis Bank credit card/, /press 2 for your Vodafone Idea SIM card/]],
-      ['menu-selection', { SpeechResult: 'the SIM card please', Confidence: '0.9' }, [/You selected your Vodafone Idea SIM card/]],
+      ['inbound-call', {}, [/more than one delivery linked to your number/, /consignment tracking number/, /verify-input/]],
+      ['verify-input', { Digits: '1007' }, [/details have been verified/, /Vodafone Idea SIM card ending in 1 1 7 5/]],
       ['menu-selection', { Digits: '1' }, [/out for delivery/]],
     ])
   );
@@ -187,7 +192,8 @@ async function main() {
   await scenario(12, 'Security fallback -> 2x failed verification -> agent', () =>
     callFlow('+919999900012', [
       ['inbound-call', {}, [/consignment tracking number/]],
-      ['verify-input', { Digits: '5555' }, [/could not match those details/, /verify-input/]],
+      ['verify-input', { Digits: '5555' }, [/could not match those details/, /consignment tracking number/]],
+      ['verify-input', { Digits: '1008' }, [/date of birth/]],
       ['verify-input', { Digits: '01011901' }, [/unable to verify your details for security reasons/, /Transferring your call/, DIAL]],
     ])
   );
@@ -213,8 +219,13 @@ async function main() {
     expect(!JSON.stringify(v.json).includes('1985-03-12'), 'validate-caller leaked DOB');
     expect(/<Response>/.test(v.json.twiml), 'validate-caller missing twiml');
 
-    const s1 = await api('/api/workflow/verify-secondary', { callSid: sid(), identifier: '15081990', type: 'DOB', attemptCount: 1 });
+    const vSid = sid();
+    const s0 = await api('/api/workflow/verify-secondary', { callSid: vSid, identifier: 'CCD1008', type: 'CONSIGNMENT', callerPhone: '+919999900099' });
+    expect(s0.json.verified === false && s0.json.nextAction === 'DOB_REQUIRED' && /date of birth/.test(s0.json.twiml), `consignment not linked -> DOB: ${JSON.stringify(s0.json)}`);
+    const s1 = await api('/api/workflow/verify-secondary', { callSid: vSid, identifier: '15081990', type: 'DOB' });
     expect(s1.json.verified === true && s1.json.consignment.consignmentId === 'CCD1008', `verify DOB: ${JSON.stringify(s1.json)}`);
+    const sx = await api('/api/workflow/verify-secondary', { callSid: sid(), identifier: '15081990', type: 'DOB' });
+    expect(sx.status === 400, `DOB before consignment must be rejected: ${sx.status}`);
     const s2 = await api('/api/workflow/verify-secondary', { callSid: sid(), identifier: 'CCD9999', type: 'CONSIGNMENT', attemptCount: 2 });
     expect(s2.json.verified === false && s2.json.escalateToAgent === true && /<Dial/.test(s2.json.twiml), `verify fail x2: ${JSON.stringify(s2.json)}`);
 

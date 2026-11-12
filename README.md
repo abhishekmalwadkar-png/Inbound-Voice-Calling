@@ -46,8 +46,9 @@ nginx/ccd-voice.conf          Reverse proxy
 | Stage | Caller input | Result |
 |---|---|---|
 | Inbound | ANI matches 1 active consignment | Welcome + main menu |
-| Inbound | ANI matches 2+ | "Press 1 for … press 2 for …" (digit or speech, e.g. "the SIM") |
-| Inbound | ANI unknown | Ask for consignment number (`CCD1008` or just `1008` on the keypad) or DOB `DDMMYYYY` |
+| Inbound | ANI matches 2+ consignments, or ANI unknown | Ask for the consignment number (`CCD1008`, or just `1008` on the keypad) |
+| Verification | Consignment linked to the calling number | Verified |
+| Verification | Consignment valid but not linked to the calling number | Ask for the date of birth (`DDMMYYYY` or spoken), checked against that consignment |
 | Main menu / follow-up | `1` / "status" | Current status |
 | | `2` / "when will it arrive" | Expected delivery date |
 | | `3` / "why wasn't it delivered" | Attempt history + next attempt + ID requirement |
@@ -63,6 +64,8 @@ Escalation rules:
 
 If the agent line is busy or unanswered, `agent-dial-status` plays the "All agents are currently busy" message and hangs up.
 
+If no agent number is configured (no `LIVE_AGENT_PHONE_NUMBER` in `.env` and no `agentNumber` passed in the request), the bot apologises and ends the call instead of dialling (PPT slide 18). The audit row is recorded as `AGENT_UNAVAILABLE` with the escalation reason, and the workflow `agent-transfer` API returns `action: END_CALL`.
+
 ## Test fixtures (db/seed.sql)
 
 | # | Caller number | Expected |
@@ -72,12 +75,12 @@ If the agent line is busy or unanswered, `agent-dial-status` plays the "All agen
 | 3 | +919800000004 | Out for delivery (SBI debit card) |
 | 4, 10 | +919800000002 | Delivery attempted: premises locked yesterday 2:30 PM |
 | 5 | +919800000005 | Delivered |
-| 6 | any unknown number | Enter `1008` / say "CCD 1008" |
-| 7 | any unknown number | Enter `15081990` / say "15th August 1990" |
-| 8 | +919800000006 | Two consignments: disambiguation |
+| 6 | any unknown number | Enter `1008`, then DOB `15081990` |
+| 7 | any unknown number | Say "CCD 1008", then "15th August 1990" |
+| 8 | +919800000006 | Two consignments: enter `1007` (linked to this number) |
 | 9 | +919800000010 | Two failed attempts: history spoken |
 | 11 | any recognised number | Press 9 |
-| 12 | any unknown number | Two wrong entries → agent |
+| 12 | any unknown number | Two failed checks (wrong consignment or DOB) → agent |
 | 13 | any recognised number | Silence / gibberish / low confidence → reprompt → escalate |
 
 Seed dates are relative to `CURRENT_DATE`. Re-run `npm run db:init` any day to refresh them.
@@ -182,7 +185,24 @@ The dashboard shows only records stored in PostgreSQL, and updates the moment th
 - If PostgreSQL is unreachable, the dashboard clears to "Database not connected" rather than showing stale numbers. The server reconnects automatically, and the dashboard repopulates by itself.
 - If the live stream can't be used (for example, a proxy blocks it), the page falls back to polling every 5 seconds.
 
+## Caller verification status
+
+Each call row in `call_audit_logs` records `verification_status` and `verification_attempts`. Both columns are added by `db/app_extensions.sql`, and existing rows are filled in from `validation_method`.
+
+| Status | When |
+|---|---|
+| `VERIFIED` | Phone number matched (ANI / ANI_MULTI), or the consignment number or DOB was accepted |
+| `PENDING` | Verification asked; the call is still in progress |
+| `NOT_VERIFIED` | Two failed attempts, or the caller hung up or asked for an agent before verifying |
+
+Verification is per call. A caller whose number isn't in `consignments` is asked for a consignment number or DOB on every call. Rows written by other systems without the column, for example with `validation_method = 'ANI_MATCH'`, get a status worked out from the method when read.
+
 ## Dashboard tabs
 
 - **Home**: KPI cards, charts, the virtual phone and the latest 25 audit rows.
+- **SIM Deliveries**: SIM card consignments only (`item_type` containing "SIM"), with the latest attempt from `delivery_attempts`.
+  - Status tiles (click to filter), and filters for operator, status and active records.
+  - Sortable, paginated table. Click a row for its full attempt history and the customer calls about it.
+  - CSV download of the filtered list.
+  - Updates live when consignments or attempts change in PostgreSQL.
 - **Logs**: the full `call_audit_logs` table, with search, date range, disposition and validation filters, and pagination. **Download CSV** exports every row that matches the current filters (up to 50,000), with caller numbers masked. The same export is available at `GET /api/dashboard/audit-logs/export.csv?q=&from=YYYY-MM-DD&to=YYYY-MM-DD&disposition=&validation=` when signed in.

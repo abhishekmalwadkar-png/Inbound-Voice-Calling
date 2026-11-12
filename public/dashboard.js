@@ -372,6 +372,36 @@
     return td;
   }
 
+  const VERIFY_META = {
+    VERIFIED: ['\u2713', 'Verified'],
+    NOT_VERIFIED: ['\u2715', 'Not verified'],
+    PENDING: ['\u2026', 'Pending'],
+  };
+
+  /** Verification badge cell; optionally shows how many ID attempts were made. */
+  function verificationCell(status, attempts, { showAttempts = false } = {}) {
+    const td = document.createElement('td');
+    if (!status) {
+      td.textContent = '\u2013';
+      td.className = 'muted';
+      return td;
+    }
+    const [icon, label] = VERIFY_META[status] || ['', status];
+    const span = document.createElement('span');
+    span.className = `verify ${status}`;
+    span.innerHTML = '<span class="ico" aria-hidden="true"></span><span class="lbl"></span>';
+    span.querySelector('.ico').textContent = icon;
+    span.querySelector('.lbl').textContent = label;
+    td.appendChild(span);
+    if (showAttempts && attempts) {
+      const small = document.createElement('span');
+      small.className = 'verify-attempts';
+      small.textContent = `${attempts} ID attempt${attempts === 1 ? '' : 's'}`;
+      td.appendChild(small);
+    }
+    return td;
+  }
+
   function formatTime(ts) {
     if (!ts) return '–';
     const m = String(ts).match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
@@ -588,6 +618,9 @@
     else $('kpiAht').textContent = '–';
     if (k.totalCalls) animateValue($('kpiValidation'), k.validationAccuracy, pct);
     else $('kpiValidation').textContent = '–';
+    $('kpiValidationSub').textContent = k.totalCalls
+      ? `${fmtInt.format(k.verifiedCalls || 0)} verified \u00b7 ${fmtInt.format(k.notVerifiedCalls || 0)} not verified`
+      : 'Callers verified successfully';
     if (k.completedCalls) animateValue($('kpiEscalation'), k.escalationRate, pct);
     else $('kpiEscalation').textContent = '–';
     animateValue($('kpiSavings'), k.estimatedCostSavingsInr, (v) => fmtInr.format(Math.round(v)));
@@ -598,7 +631,7 @@
   function renderHomeAudit(page) {
     const body = $('auditBody');
     if (!page.rows.length) {
-      emptyRow(body, 6, 'No calls logged yet. Place a call from the virtual phone.');
+      emptyRow(body, 7, 'No calls logged yet. Place a call from the virtual phone.');
     } else {
       body.innerHTML = '';
       page.rows.forEach((r) => {
@@ -606,6 +639,7 @@
         tr.title = `Call SID ${r.callSid}${r.escalationReason ? ` · ${r.escalationReason}` : ''}`;
         tr.appendChild(cell(formatTime(r.updatedAt || r.createdAt)));
         tr.appendChild(cell(r.callerPhone));
+        tr.appendChild(verificationCell(r.verificationStatus, r.verificationAttempts));
         tr.appendChild(cell(r.consignmentId));
         tr.appendChild(cell(r.intentDetected));
         tr.appendChild(cell(duration(r.durationSeconds)));
@@ -639,6 +673,7 @@
     add('to', $('fTo').value);
     add('disposition', $('fDisposition').value);
     add('validation', $('fValidation').value);
+    add('verification', $('fVerification').value);
     params.set('sort', logs.sort);
     params.set('dir', logs.dir);
     return params;
@@ -654,7 +689,7 @@
   function renderLogs(page) {
     const body = $('logsBody');
     if (!page.rows.length) {
-      emptyRow(body, 10, 'No calls match these filters.');
+      emptyRow(body, 11, 'No calls match these filters.');
     } else {
       body.innerHTML = '';
       page.rows.forEach((r) => {
@@ -663,6 +698,7 @@
         tr.appendChild(cell(formatTime(r.updatedAt)));
         tr.appendChild(cell(r.callSid, 'mono'));
         tr.appendChild(cell(r.callerPhone));
+        tr.appendChild(verificationCell(r.verificationStatus, r.verificationAttempts, { showAttempts: true }));
         tr.appendChild(cell(r.consignmentId));
         tr.appendChild(cell(r.validationMethod));
         tr.appendChild(cell(r.intentDetected));
@@ -700,7 +736,7 @@
       renderLogs(page);
     } catch (err) {
       if (err.message !== 'Session expired') {
-        emptyRow($('logsBody'), 10, `Could not load logs: ${err.message}`);
+        emptyRow($('logsBody'), 11, `Could not load logs: ${err.message}`);
         $('logsSummary').textContent = ' ';
         $('logsPager').innerHTML = '';
       }
@@ -777,20 +813,392 @@
   // Tabs + refresh loop
   // ===========================================================================
 
+  // ===========================================================================
+  // Deliveries tab: status tiles, filters, sorting, pagination, detail drawer, CSV
+  // ===========================================================================
+
+  const STATUS_META = [
+    ['DISPATCHED', 'Dispatched', 'Left the hub'],
+    ['IN_TRANSIT', 'In Transit', 'Moving through network'],
+    ['OUT_FOR_DELIVERY', 'Out for Delivery', 'With delivery agent'],
+    ['DELIVERY_ATTEMPTED', 'Delivery Attempted', 'Needs another attempt'],
+    ['DELIVERED', 'Delivered', 'Handed to customer'],
+  ];
+  const ICON_CARD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>';
+  const ICON_SIM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><rect x="8" y="11" width="8" height="7" rx="1"/></svg>';
+
+  // This view is scoped to SIM card consignments only.
+  const DELIVERY_KIND = 'SIM';
+  const deliveries = { offset: 0, total: 0, sort: 'status', dir: 'asc', loading: false, openId: null };
+
+  function deliveryFilters({ includeStatus = true } = {}) {
+    const params = new URLSearchParams();
+    const add = (key, value) => value && params.set(key, value);
+    add('q', $('dSearch').value.trim());
+    add('issuer', $('dIssuer').value);
+    if (includeStatus) add('status', $('dStatus').value);
+    params.set('kind', DELIVERY_KIND);
+    params.set('active', $('dActive').value);
+    params.set('sort', deliveries.sort);
+    params.set('dir', deliveries.dir);
+    return params;
+  }
+
+  function formatDate(value) {
+    if (!value) return '–';
+    const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return String(value);
+    const d = new Date(+m[1], +m[2] - 1, +m[3]);
+    const today = new Date();
+    const diff = Math.round((d - new Date(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000);
+    const label = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    if (diff === 0) return `Today · ${label}`;
+    if (diff === 1) return `Tomorrow · ${label}`;
+    if (diff === -1) return `Yesterday · ${label}`;
+    return label;
+  }
+
+  function statusBadge(status, label) {
+    const span = document.createElement('span');
+    span.className = `status-badge ${status}`;
+    span.textContent = label || status;
+    return span;
+  }
+
+  function renderStatusTiles(summary) {
+    const active = $('dStatus').value;
+    const wrap = $('statusTiles');
+    wrap.innerHTML = '';
+    const tiles = [['ALL', 'All SIM cards', 'Matching current filters', summary.total], ...STATUS_META.map(([s, l, sub]) => [s, l, sub, (summary.statuses.find((x) => x.status === s) || {}).count || 0])];
+    tiles.forEach(([status, label, sub, count], i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `status-tile float st-${status}`;
+      b.setAttribute('aria-pressed', String((status === 'ALL' && !active) || status === active));
+      b.innerHTML = `<span class="st-label"><span class="st-dot"></span></span><span class="st-count"></span><span class="st-sub"></span>`;
+      b.querySelector('.st-label').append(label);
+      b.querySelector('.st-count').textContent = fmtInt.format(count);
+      b.querySelector('.st-sub').textContent = sub;
+      b.style.animationDelay = `${i * 0.04}s`;
+      b.addEventListener('click', () => {
+        $('dStatus').value = status === 'ALL' ? '' : status;
+        deliveries.offset = 0;
+        loadDeliveries();
+      });
+      wrap.appendChild(b);
+    });
+
+    // Keep the issuer dropdown in sync with what is in the database.
+    const sel = $('dIssuer');
+    const current = sel.value;
+    const existing = [...sel.options].slice(1).map((o) => o.value).join('|');
+    if (existing !== summary.issuers.join('|')) {
+      sel.length = 1;
+      summary.issuers.forEach((name) => sel.add(new Option(name, name)));
+      sel.value = summary.issuers.includes(current) ? current : '';
+    }
+  }
+
+  function renderDeliveries(page) {
+    const body = $('deliveriesBody');
+    if (!page.rows.length) {
+      emptyRow(body, 10, 'No SIM consignments match these filters.');
+    } else {
+      body.innerHTML = '';
+      page.rows.forEach((r) => {
+        const tr = document.createElement('tr');
+        tr.className = 'clickable';
+        tr.tabIndex = 0;
+        tr.title = 'Open attempt history and calls';
+        tr.addEventListener('click', () => openDrawer(r.consignmentId));
+        tr.addEventListener('keydown', (e) => e.key === 'Enter' && openDrawer(r.consignmentId));
+
+        const idCell = cell(r.consignmentId, 'mono');
+        if (!r.isActive) {
+          const tag = document.createElement('span');
+          tag.className = 'inactive-tag';
+          tag.textContent = 'INACTIVE';
+          idCell.appendChild(tag);
+        }
+        tr.appendChild(idCell);
+
+        const item = document.createElement('td');
+        item.innerHTML = `<div class="item-cell"><span class="item-icon">${r.itemKind === 'SIM' ? ICON_SIM : ICON_CARD}</span><div><strong></strong><span></span></div></div>`;
+        item.querySelector('strong').textContent = r.issuer;
+        item.querySelector('div > div > span').textContent = `${r.itemLabel} · •••• ${r.last4}`;
+        tr.appendChild(item);
+
+        tr.appendChild(cell(r.customerPhone));
+        const st = document.createElement('td');
+        st.appendChild(statusBadge(r.status, r.statusLabel));
+        tr.appendChild(st);
+        tr.appendChild(cell(formatDate(r.expectedDeliveryDate)));
+        tr.appendChild(cell(r.lastLocation));
+        tr.appendChild(cell(r.attemptCount ? String(r.attemptCount) : '0'));
+        tr.appendChild(cell(r.lastAttemptAt ? formatTime(r.lastAttemptAt) : null));
+        const reason = r.lastFailureReason ? r.lastFailureReason.charAt(0).toUpperCase() + r.lastFailureReason.slice(1) : null;
+        const fail = cell(reason, 'fail-text');
+        if (!r.lastFailureReason) fail.className = 'muted';
+        if (r.lastFailureReason) fail.title = r.lastFailureReason;
+        tr.appendChild(fail);
+        tr.appendChild(cell(r.status === 'DELIVERED' ? null : r.nextAttemptDate ? formatDate(r.nextAttemptDate) : null));
+        body.appendChild(tr);
+      });
+    }
+    deliveries.total = page.total;
+    $('deliveriesSummary').textContent = summary(page, page.rows.length, 'SIM consignments');
+    $('btnDeliveriesCsv').disabled = page.total === 0;
+    renderPager($('deliveriesPager'), page, (offset) => {
+      deliveries.offset = offset;
+      loadDeliveries();
+    });
+  }
+
+  function renderDeliverySortHeaders() {
+    document.querySelectorAll('#deliveriesHead th.sortable').forEach((th) => {
+      const isActive = th.dataset.sort === deliveries.sort;
+      th.setAttribute('aria-sort', isActive ? (deliveries.dir === 'asc' ? 'ascending' : 'descending') : 'none');
+    });
+  }
+
+  async function loadDeliveries() {
+    if (deliveries.loading) return;
+    deliveries.loading = true;
+    const params = deliveryFilters();
+    params.set('limit', $('deliveriesPageSize').value);
+    params.set('offset', String(deliveries.offset));
+    try {
+      const [listRes, sumRes] = await Promise.all([
+        apiFetch(`/api/dashboard/consignments?${params}`),
+        apiFetch(`/api/dashboard/consignments/summary?${deliveryFilters({ includeStatus: false })}`),
+      ]);
+      if (!listRes.ok) throw new Error((await listRes.json()).detail || listRes.statusText);
+      if (!sumRes.ok) throw new Error((await sumRes.json()).detail || sumRes.statusText);
+      const page = await listRes.json();
+      if (page.total && page.offset >= page.total) {
+        deliveries.offset = Math.floor((page.total - 1) / page.limit) * page.limit;
+        deliveries.loading = false;
+        return loadDeliveries();
+      }
+      renderStatusTiles(await sumRes.json());
+      renderDeliveries(page);
+      if (deliveries.openId) openDrawer(deliveries.openId, { quiet: true });
+    } catch (err) {
+      if (err.message === 'Session expired') return;
+      throw err;
+    } finally {
+      deliveries.loading = false;
+    }
+  }
+
+  async function downloadDeliveriesCsv() {
+    const btn = $('btnDeliveriesCsv');
+    btn.disabled = true;
+    try {
+      const res = await apiFetch(`/api/dashboard/consignments/export.csv?${deliveryFilters()}`);
+      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+      const blob = await res.blob();
+      const match = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = match ? match[1] : 'ccd-sim-deliveries.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch (err) {
+      if (err.message !== 'Session expired') alert(`CSV download failed: ${err.message}`);
+    } finally {
+      btn.disabled = deliveries.total === 0;
+    }
+  }
+
+  // --- Detail drawer ---------------------------------------------------------
+  function infoItem(label, value) {
+    const div = document.createElement('div');
+    const dt = document.createElement('dt');
+    const dd = document.createElement('dd');
+    dt.textContent = label;
+    dd.textContent = value === null || value === undefined || value === '' ? '–' : value;
+    div.append(dt, dd);
+    return div;
+  }
+
+  function section(title, content) {
+    const wrap = document.createElement('section');
+    const h = document.createElement('h4');
+    h.textContent = title;
+    wrap.append(h, content);
+    return wrap;
+  }
+
+  function emptyNote(text) {
+    const p = document.createElement('div');
+    p.className = 'drawer-empty';
+    p.textContent = text;
+    return p;
+  }
+
+  async function openDrawer(id, { quiet = false } = {}) {
+    deliveries.openId = id;
+    if (!quiet) {
+      $('drawerTitle').textContent = id;
+      $('drawerSubtitle').textContent = 'Loading…';
+      $('drawerBody').innerHTML = '';
+      $('drawer').classList.add('open');
+      $('drawerBackdrop').classList.add('open');
+      $('drawer').setAttribute('aria-hidden', 'false');
+    }
+    try {
+      const res = await apiFetch(`/api/dashboard/consignments/${encodeURIComponent(id)}`);
+      if (res.status === 404) {
+        $('drawerSubtitle').textContent = 'This consignment no longer exists.';
+        $('drawerBody').innerHTML = '';
+        return;
+      }
+      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+      if (deliveries.openId !== id) return;
+      const { consignment: c, attempts, calls } = await res.json();
+
+      $('drawerTitle').textContent = c.consignmentId;
+      $('drawerSubtitle').textContent = `${c.issuer} ${c.itemLabel} · •••• ${c.last4}${c.isActive ? '' : ' · inactive'}`;
+      const body = $('drawerBody');
+      body.innerHTML = '';
+
+      const grid = document.createElement('dl');
+      grid.className = 'info-grid';
+      const statusDiv = infoItem('Status', '');
+      statusDiv.querySelector('dd').textContent = '';
+      statusDiv.querySelector('dd').appendChild(statusBadge(c.status, c.statusLabel));
+      grid.append(
+        statusDiv,
+        infoItem('Expected delivery', formatDate(c.expectedDeliveryDate)),
+        infoItem('Last location', c.lastLocation),
+        infoItem('Customer', c.customerPhone),
+        infoItem('Item', `${c.itemLabel} (${c.maskedNumber})`),
+        infoItem('Created', formatTime(c.createdAt))
+      );
+      body.appendChild(section('Consignment', grid));
+
+      if (attempts.length) {
+        const ul = document.createElement('ul');
+        ul.className = 'timeline';
+        attempts.forEach((a, i) => {
+          const li = document.createElement('li');
+          li.innerHTML = '<div class="when"></div><div class="what"></div><div class="note"></div>';
+          li.querySelector('.when').textContent = `Attempt ${attempts.length - i} · ${formatTime(a.attemptTimestamp)}`;
+          li.querySelector('.what').textContent = a.failureReason.charAt(0).toUpperCase() + a.failureReason.slice(1);
+          const notes = [a.courierNotes ? `Courier: ${a.courierNotes}` : '', a.nextAttemptDate ? `Next attempt: ${formatDate(a.nextAttemptDate)}` : ''].filter(Boolean).join(' · ');
+          li.querySelector('.note').textContent = notes;
+          ul.appendChild(li);
+        });
+        body.appendChild(section(`Delivery attempts (${attempts.length})`, ul));
+      } else {
+        body.appendChild(section('Delivery attempts', emptyNote('No failed delivery attempts recorded.')));
+      }
+
+      if (calls.length) {
+        const list = document.createElement('div');
+        list.className = 'mini-calls';
+        calls.forEach((call) => {
+          const row = document.createElement('div');
+          row.className = 'mini-call';
+          row.innerHTML = '<div><div class="what"></div><div class="meta"></div></div>';
+          row.querySelector('.what').textContent = `${call.intentDetected || 'Call'} · ${call.validationMethod || '–'}`;
+          row.querySelector('.meta').textContent = `${formatTime(call.updatedAt || call.createdAt)} · ${call.callerPhone || '–'} · ${(VERIFY_META[call.verificationStatus] || ['', 'Verification unknown'])[1]}${call.durationSeconds ? ` · ${call.durationSeconds}s` : ''}`;
+          const badgeTd = dispositionCell(call.disposition);
+          row.appendChild(badgeTd.firstChild);
+          list.appendChild(row);
+        });
+        body.appendChild(section(`Customer calls (${calls.length})`, list));
+      } else {
+        body.appendChild(section('Customer calls', emptyNote('No calls about this consignment yet.')));
+      }
+    } catch (err) {
+      if (err.message !== 'Session expired') $('drawerSubtitle').textContent = `Could not load: ${err.message}`;
+    }
+  }
+
+  function closeDrawer() {
+    deliveries.openId = null;
+    $('drawer').classList.remove('open');
+    $('drawerBackdrop').classList.remove('open');
+    $('drawer').setAttribute('aria-hidden', 'true');
+  }
+
+  function wireDeliveries() {
+    $('btnDeliveriesCsv').addEventListener('click', downloadDeliveriesCsv);
+    $('deliveryFilters').addEventListener('submit', (e) => {
+      e.preventDefault();
+      deliveries.offset = 0;
+      loadDeliveries();
+    });
+    ['dIssuer', 'dStatus', 'dActive'].forEach((id) =>
+      $(id).addEventListener('change', () => {
+        deliveries.offset = 0;
+        loadDeliveries();
+      })
+    );
+    $('btnResetDeliveries').addEventListener('click', () => {
+      $('deliveryFilters').reset();
+      deliveries.offset = 0;
+      deliveries.sort = 'status';
+      deliveries.dir = 'asc';
+      renderDeliverySortHeaders();
+      loadDeliveries();
+    });
+    $('deliveriesPageSize').addEventListener('change', () => {
+      deliveries.offset = 0;
+      loadDeliveries();
+    });
+    document.querySelectorAll('#deliveriesHead th.sortable').forEach((th) => {
+      th.tabIndex = 0;
+      const toggle = () => {
+        if (deliveries.sort === th.dataset.sort) deliveries.dir = deliveries.dir === 'asc' ? 'desc' : 'asc';
+        else {
+          deliveries.sort = th.dataset.sort;
+          deliveries.dir = /attemptCount|lastAttemptAt/.test(th.dataset.sort) ? 'desc' : 'asc';
+        }
+        deliveries.offset = 0;
+        renderDeliverySortHeaders();
+        loadDeliveries();
+      };
+      th.addEventListener('click', toggle);
+      th.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggle();
+        }
+      });
+    });
+    $('drawerClose').addEventListener('click', closeDrawer);
+    $('drawerBackdrop').addEventListener('click', closeDrawer);
+    document.addEventListener('keydown', (e) => e.key === 'Escape' && deliveries.openId && closeDrawer());
+    renderDeliverySortHeaders();
+  }
+
+  // ===========================================================================
+  // Tabs
+  // ===========================================================================
+
+  const TABS = ['home', 'deliveries', 'logs'];
   let activeTab = 'home';
 
   function showTab(name) {
-    activeTab = name === 'logs' ? 'logs' : 'home';
+    activeTab = TABS.includes(name) ? name : 'home';
     $('tabHome').hidden = activeTab !== 'home';
+    $('tabDeliveries').hidden = activeTab !== 'deliveries';
     $('tabLogs').hidden = activeTab !== 'logs';
     $('tabBtnHome').setAttribute('aria-selected', String(activeTab === 'home'));
+    $('tabBtnDeliveries').setAttribute('aria-selected', String(activeTab === 'deliveries'));
     $('tabBtnLogs').setAttribute('aria-selected', String(activeTab === 'logs'));
     try {
-      history.replaceState(null, '', activeTab === 'logs' ? '#logs' : '#home');
+      history.replaceState(null, '', `#${activeTab}`);
     } catch (e) {
       /* sandboxed */
     }
     if (activeTab === 'logs') loadLogs();
+    else if (activeTab === 'deliveries') loadDeliveries().catch(() => {});
     else Object.values(charts).forEach((c) => c.resize());
   }
 
@@ -826,13 +1234,18 @@
       $(id).lastChild.textContent = 'Database not connected. No records to show.';
       $(id).classList.add('show');
     });
-    emptyRow($('auditBody'), 6, 'Database not connected. Records will appear as soon as PostgreSQL is reachable.');
+    emptyRow($('auditBody'), 7, 'Database not connected. Records will appear as soon as PostgreSQL is reachable.');
     $('auditSummary').textContent = ' ';
     $('auditPager').innerHTML = '';
-    emptyRow($('logsBody'), 10, 'Database not connected. Records will appear as soon as PostgreSQL is reachable.');
+    emptyRow($('logsBody'), 11, 'Database not connected. Records will appear as soon as PostgreSQL is reachable.');
     $('logsSummary').textContent = ' ';
     $('logsPager').innerHTML = '';
     $('btnDownloadCsv').disabled = true;
+    emptyRow($('deliveriesBody'), 10, 'Database not connected. Records will appear as soon as PostgreSQL is reachable.');
+    $('deliveriesSummary').textContent = ' ';
+    $('deliveriesPager').innerHTML = '';
+    $('statusTiles').innerHTML = '';
+    $('btnDeliveriesCsv').disabled = true;
   }
 
   const EMPTY_TEXT = {
@@ -852,6 +1265,7 @@
       updateCharts(metrics);
       await loadHomeAudit();
       if (activeTab === 'logs') await loadLogs();
+      if (activeTab === 'deliveries') await loadDeliveries();
       setDbIndicator(stream.live ? 'live' : 'ok', `Updated ${new Date().toLocaleTimeString()}`);
     } catch (err) {
       if (err.message === 'Session expired') return;
@@ -929,13 +1343,15 @@
   function init() {
     buildPhone();
     wireLogs();
+    wireDeliveries();
     $('tabBtnHome').addEventListener('click', () => showTab('home'));
+    $('tabBtnDeliveries').addEventListener('click', () => showTab('deliveries'));
     $('tabBtnLogs').addEventListener('click', () => showTab('logs'));
     $('btnViewLogs').addEventListener('click', () => showTab('logs'));
     $('btnLogout').addEventListener('click', logout);
     initCharts();
     loadUser();
-    showTab(location.hash === '#logs' ? 'logs' : 'home');
+    showTab(location.hash.replace('#', ''));
     refresh();
     startPolling(REFRESH_MS); // until the live stream is confirmed
     connectStream();

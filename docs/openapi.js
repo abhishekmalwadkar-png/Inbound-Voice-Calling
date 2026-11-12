@@ -161,7 +161,7 @@ const schemas = {
       callerVerified: { type: 'boolean' },
       consignmentCount: { type: 'integer' },
       consignments: { type: 'array', items: ref('Consignment') },
-      nextAction: { type: 'string', enum: ['MAIN_MENU', 'DISAMBIGUATE', 'SECONDARY_VERIFICATION', 'AGENT_TRANSFER'] },
+      nextAction: { type: 'string', enum: ['MAIN_MENU', 'SECONDARY_VERIFICATION', 'AGENT_TRANSFER'] },
       twiml: { type: 'string' },
     },
   },
@@ -193,7 +193,7 @@ const schemas = {
       validationMethod: { type: 'string', nullable: true, enum: ['CONSIGNMENT', 'DOB', 'FAILED', null] },
       consignment: { type: 'object', allOf: [ref('Consignment')], nullable: true },
       consignments: { type: 'array', items: ref('Consignment') },
-      nextAction: { type: 'string', enum: ['MAIN_MENU', 'DISAMBIGUATE', 'RETRY_VERIFICATION', 'AGENT_TRANSFER'] },
+      nextAction: { type: 'string', enum: ['MAIN_MENU', 'DOB_REQUIRED', 'RETRY_CONSIGNMENT', 'RETRY_DOB', 'AGENT_TRANSFER'] },
       twiml: { type: 'string' },
     },
   },
@@ -289,8 +289,8 @@ const schemas = {
     properties: {
       success: { type: 'boolean' },
       callSid: { type: 'string' },
-      action: { type: 'string', example: 'DIAL_AGENT' },
-      destination: { type: 'string', example: '+919876543210' },
+      action: { type: 'string', enum: ['DIAL_AGENT', 'END_CALL'], example: 'DIAL_AGENT', description: '`END_CALL` when no agent number is configured: the TwiML apologises and hangs up.' },
+      destination: { type: 'string', nullable: true, example: '+919876543210' },
       callerId: { type: 'string', nullable: true },
       reason: { type: 'string' },
       dialTimeoutSeconds: { type: 'integer' },
@@ -419,7 +419,10 @@ const schemas = {
           activeCalls: { type: 'integer' },
           containmentRate: { type: 'number', description: '%' },
           averageHandlingTimeSeconds: { type: 'integer' },
-          validationAccuracy: { type: 'number', description: '%' },
+          validationAccuracy: { type: 'number', description: '% of finished verifications that succeeded (verified / (verified + not verified)).' },
+          verifiedCalls: { type: 'integer' },
+          notVerifiedCalls: { type: 'integer' },
+          pendingVerification: { type: 'integer' },
           escalationRate: { type: 'number', description: '%' },
           estimatedCostSavingsInr: { type: 'integer' },
           costAssumptions: { type: 'object', properties: { costPerAgentCallInr: { type: 'number' }, costPerBotCallInr: { type: 'number' } } },
@@ -444,7 +447,9 @@ const schemas = {
       callSid: { type: 'string' },
       callerPhone: { type: 'string', description: 'Masked, e.g. +91******0001' },
       consignmentId: { type: 'string', nullable: true },
-      validationMethod: { type: 'string', nullable: true },
+      validationMethod: { type: 'string', nullable: true, description: 'ANI, ANI_MULTI, CONSIGNMENT, DOB, FAILED (ANI_MATCH is reported as ANI).' },
+      verificationStatus: { type: 'string', nullable: true, enum: ['VERIFIED', 'NOT_VERIFIED', 'PENDING', null], description: 'Caller identity verification outcome for the call.' },
+      verificationAttempts: { type: 'integer', nullable: true, description: 'Consignment number / DOB entries made (0 when verified by phone).' },
       intentDetected: { type: 'string', nullable: true },
       durationSeconds: { type: 'integer', nullable: true },
       disposition: { type: 'string', enum: ['BOT_RESOLVED', 'CALLER_ENDED', 'AGENT_TRANSFERRED', 'AGENT_UNAVAILABLE', 'ABANDONED', 'IN_PROGRESS'] },
@@ -460,6 +465,64 @@ const schemas = {
       limit: { type: 'integer' },
       offset: { type: 'integer' },
       rows: { type: 'array', items: ref('AuditLog') },
+    },
+  },
+  DeliveryRow: {
+    allOf: [
+      ref('Consignment'),
+      {
+        type: 'object',
+        properties: {
+          customerPhone: { type: 'string', example: '+91******0010', description: 'Masked.' },
+          attemptCount: { type: 'integer', example: 2 },
+          lastAttemptAt: { type: 'string', nullable: true, example: '2026-11-11 16:45:00' },
+          lastFailureReasonCode: { type: 'string', nullable: true, example: 'ID_PROOF_UNAVAILABLE' },
+          lastFailureReason: { type: 'string', nullable: true, example: 'a valid government photo ID could not be produced at the time of delivery' },
+          nextAttemptDate: { type: 'string', nullable: true, example: '2026-11-13' },
+          createdAt: { type: 'string' },
+        },
+      },
+    ],
+  },
+  DeliveryPage: {
+    type: 'object',
+    properties: {
+      total: { type: 'integer' },
+      limit: { type: 'integer' },
+      offset: { type: 'integer' },
+      rows: { type: 'array', items: ref('DeliveryRow') },
+    },
+  },
+  DeliverySummary: {
+    type: 'object',
+    properties: {
+      total: { type: 'integer', description: 'Consignments matching the filters (status filter ignored).' },
+      statuses: {
+        type: 'array',
+        items: { type: 'object', properties: { status: ref('ConsignmentStatus'), label: { type: 'string' }, count: { type: 'integer' } } },
+      },
+      issuers: { type: 'array', items: { type: 'string' }, example: ['Airtel', 'HDFC Bank'] },
+      activeByKind: { type: 'object', properties: { CARD: { type: 'integer' }, SIM: { type: 'integer' } } },
+    },
+  },
+  DeliveryDetail: {
+    type: 'object',
+    properties: {
+      consignment: ref('DeliveryRow'),
+      attempts: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            attemptTimestamp: { type: 'string' },
+            failureReasonCode: { type: 'string' },
+            failureReason: { type: 'string' },
+            courierNotes: { type: 'string', nullable: true },
+            nextAttemptDate: { type: 'string', nullable: true },
+          },
+        },
+      },
+      calls: { type: 'array', items: ref('AuditLog') },
     },
   },
   CallEvent: {
@@ -487,7 +550,8 @@ const AUDIT_FILTERS = [
   { name: 'from', in: 'query', schema: { type: 'string', format: 'date' }, description: 'Created on or after (YYYY-MM-DD).' },
   { name: 'to', in: 'query', schema: { type: 'string', format: 'date' }, description: 'Created on or before (YYYY-MM-DD).' },
   { name: 'disposition', in: 'query', schema: { type: 'string', enum: ['BOT_RESOLVED', 'CALLER_ENDED', 'AGENT_TRANSFERRED', 'AGENT_UNAVAILABLE', 'ABANDONED', 'IN_PROGRESS'] } },
-  { name: 'validation', in: 'query', schema: { type: 'string', enum: ['ANI', 'ANI_MULTI', 'CONSIGNMENT', 'DOB', 'FAILED', 'WORKFLOW'] } },
+  { name: 'validation', in: 'query', schema: { type: 'string', enum: ['ANI', 'ANI_MULTI', 'CONSIGNMENT', 'DOB', 'FAILED', 'WORKFLOW'] }, description: '`ANI` also matches rows stored as `ANI_MATCH`.' },
+  { name: 'verification', in: 'query', schema: { type: 'string', enum: ['VERIFIED', 'NOT_VERIFIED', 'PENDING'] }, description: 'Caller verification outcome.' },
   {
     name: 'sort',
     in: 'query',
@@ -495,10 +559,18 @@ const AUDIT_FILTERS = [
     schema: {
       type: 'string',
       default: 'updatedAt',
-      enum: ['createdAt', 'updatedAt', 'callSid', 'callerPhone', 'consignmentId', 'validationMethod', 'intentDetected', 'durationSeconds', 'disposition', 'escalationReason'],
+      enum: ['createdAt', 'updatedAt', 'callSid', 'callerPhone', 'consignmentId', 'validationMethod', 'verificationStatus', 'verificationAttempts', 'intentDetected', 'durationSeconds', 'disposition', 'escalationReason'],
     },
   },
   { name: 'dir', in: 'query', description: 'Sort direction (empty values last).', schema: { type: 'string', enum: ['asc', 'desc'], default: 'desc' } },
+];
+
+const DELIVERY_FILTERS = [
+  { name: 'q', in: 'query', schema: { type: 'string' }, description: 'Search consignment ID, issuer, item type, location or status.' },
+  { name: 'status', in: 'query', schema: { $ref: '#/components/schemas/ConsignmentStatus' } },
+  { name: 'kind', in: 'query', schema: { type: 'string', enum: ['CARD', 'SIM'] }, description: 'Cards (credit/debit) or SIM cards.' },
+  { name: 'issuer', in: 'query', schema: { type: 'string' }, example: 'Airtel', description: 'Exact bank / operator name.' },
+  { name: 'active', in: 'query', schema: { type: 'string', enum: ['active', 'inactive', 'all'], default: 'active' } },
 ];
 
 // -----------------------------------------------------------------------------
@@ -569,7 +641,7 @@ const paths = {
     post: {
       tags: ['Workflow APIs'],
       summary: 'Validate caller by ANI (Scenario 1 / 2)',
-      description: `Matches the caller's number against active consignments.\n\n- \`SINGLE\` → welcome + main menu\n- \`MULTIPLE\` → "Press 1 / Press 2" disambiguation\n- \`NONE\` → ask for consignment number or DOB\n\n${SETTINGS_NOTE}`,
+      description: `Matches the caller's number against active consignments.\n\n- \`SINGLE\` → verified by phone → welcome + main menu\n- \`MULTIPLE\` → asked for the consignment number (secondary verification)\n- \`NONE\` → asked for the consignment number (secondary verification)\n\n${SETTINGS_NOTE}`,
       operationId: 'validateCaller',
       requestBody: jsonBody('ValidateCallerRequest', {
         single: { summary: 'Recognised caller', value: { callerPhone: '+919800000001', callSid: 'CA0123456789abcdef0123456789abcdef' } },
@@ -594,11 +666,11 @@ const paths = {
     post: {
       tags: ['Workflow APIs'],
       summary: 'Secondary identity verification (Scenario 2)',
-      description: `Validates a consignment number or date of birth. A failed **attempt 2** returns \`escalateToAgent: true\` with agent-transfer TwiML (Scenario 4). A DOB alone is accepted only if it matches exactly one customer.\n\n${SETTINGS_NOTE}`,
+      description: `Secondary verification as defined in the solution approach (slide 16): the caller gives the **consignment number** first (\`type: CONSIGNMENT\`). If it is linked to the calling number the caller is verified; if it is valid but not linked, \`nextAction: DOB_REQUIRED\` and the **date of birth** follows (\`type: DOB\`, same \`callSid\`), checked against that consignment. Two failures return \`escalateToAgent: true\` with agent-transfer TwiML (Scenario 4). Sending a DOB before the consignment number returns 400.\n\n${SETTINGS_NOTE}`,
       operationId: 'verifySecondary',
       requestBody: jsonBody('VerifySecondaryRequest', {
-        consignment: { summary: 'By consignment number', value: { callSid: 'CA0123456789abcdef0123456789abcdef', identifier: 'CCD1008', type: 'CONSIGNMENT', attemptCount: 1 } },
-        dob: { summary: 'By date of birth', value: { callSid: 'CA0123456789abcdef0123456789abcdef', identifier: '15081990', type: 'DOB', attemptCount: 1 } },
+        consignment: { summary: 'Step 1 - consignment number', value: { callSid: 'CA0123456789abcdef0123456789abcdef', callerPhone: '+919999900006', identifier: 'CCD1008', type: 'CONSIGNMENT' } },
+        dob: { summary: 'Step 2 - date of birth (after DOB_REQUIRED)', value: { callSid: 'CA0123456789abcdef0123456789abcdef', identifier: '15081990', type: 'DOB' } },
         secondFailure: { summary: 'Second failed attempt', value: { callSid: 'CA0123456789abcdef0123456789abcdef', identifier: 'CCD9999999', type: 'AUTO', attemptCount: 2 } },
       }),
       responses: {
@@ -659,7 +731,7 @@ const paths = {
     post: {
       tags: ['Workflow APIs'],
       summary: 'Live agent escalation TwiML (Scenario 4)',
-      description: `Logs the escalation reason to the audit trail and returns \`<Say>\` + \`<Dial>\` TwiML. If the agent line is busy or unanswered, Twilio calls \`dialStatusUrl\`, which plays "All agents are currently busy" and hangs up.\n\n${SETTINGS_NOTE}`,
+      description: `Logs the escalation reason to the audit trail and returns \`<Say>\` + \`<Dial>\` TwiML. If no agent number is configured (\`agentNumber\` / LIVE_AGENT_PHONE_NUMBER), the bot apologises and ends the call (\`action: END_CALL\`). If the agent line is busy or unanswered, Twilio calls \`dialStatusUrl\`, which plays "All agents are currently busy" and hangs up.\n\n${SETTINGS_NOTE}`,
       operationId: 'agentTransfer',
       requestBody: jsonBody('AgentTransferRequest', {
         customerRequest: { summary: 'Caller asked for an agent', value: { callSid: 'CA0123456789abcdef0123456789abcdef', callerPhone: '+919800000001', reason: 'CUSTOMER_REQUEST' } },
@@ -694,7 +766,7 @@ const paths = {
   '/api/telephony/menu-selection': {
     post: {
       tags: ['Twilio Webhooks'],
-      summary: 'Menu / follow-up / disambiguation <Gather> action',
+      summary: 'Menu / follow-up <Gather> action',
       description:
         'Keypad: `1` status · `2` delivery date · `3` attempt history · `4` documents / next steps · `9` agent · `0` end call · `*` repeat menu.\n\n' +
         'Speech is classified into STATUS / EDD / EXCEPTION / ACTION / AGENT / RESCHEDULE / NO / YES. An empty body (silence) re-prompts once; ' +
@@ -830,6 +902,84 @@ const paths = {
         },
         401: R401,
         503: R503DB,
+      },
+    },
+  },
+  '/api/dashboard/consignments': {
+    get: {
+      tags: ['Dashboard'],
+      summary: 'Deliveries: card & SIM consignments with latest attempt',
+      operationId: 'listConsignments',
+      security: [{ cookieAuth: [] }],
+      parameters: [
+        { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 200, default: 25 } },
+        { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+        ...DELIVERY_FILTERS,
+        {
+          name: 'sort',
+          in: 'query',
+          schema: { type: 'string', default: 'status', enum: ['consignmentId', 'issuer', 'itemType', 'status', 'expectedDeliveryDate', 'lastLocation', 'attemptCount', 'lastAttemptAt', 'createdAt'] },
+          description: '`status` sorts in lifecycle order (Dispatched → Delivered).',
+        },
+        { name: 'dir', in: 'query', schema: { type: 'string', enum: ['asc', 'desc'], default: 'asc' } },
+      ],
+      responses: { 200: jsonResponse('Page of consignments (masked)', 'DeliveryPage'), 401: R401, 503: R503DB },
+    },
+  },
+  '/api/dashboard/consignments/summary': {
+    get: {
+      tags: ['Dashboard'],
+      summary: 'Deliveries: counts per status, issuers, card/SIM split',
+      operationId: 'consignmentSummary',
+      security: [{ cookieAuth: [] }],
+      parameters: DELIVERY_FILTERS.filter((p) => p.name !== 'status'),
+      responses: { 200: jsonResponse('Status tile counts', 'DeliverySummary'), 401: R401, 503: R503DB },
+    },
+  },
+  '/api/dashboard/consignments/export.csv': {
+    get: {
+      tags: ['Dashboard'],
+      summary: 'Deliveries: download as CSV',
+      description: 'Same filters as the deliveries list; up to 50,000 rows. Phone masked; card/SIM number last 4 only.',
+      operationId: 'consignmentsCsv',
+      security: [{ cookieAuth: [] }],
+      parameters: DELIVERY_FILTERS,
+      responses: {
+        200: { description: 'CSV file', content: { 'text/csv': { schema: { type: 'string', format: 'binary' } } } },
+        401: R401,
+        503: R503DB,
+      },
+    },
+  },
+  '/api/dashboard/consignments/{id}': {
+    get: {
+      tags: ['Dashboard'],
+      summary: 'Deliveries: one consignment with attempt history and related calls',
+      operationId: 'consignmentDetail',
+      security: [{ cookieAuth: [] }],
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, example: 'CCD1010' }],
+      responses: {
+        200: jsonResponse('Consignment, attempts (newest first), last 25 calls', 'DeliveryDetail'),
+        401: R401,
+        404: jsonResponse('Consignment not found', 'Error'),
+        503: R503DB,
+      },
+    },
+  },
+  '/api/dashboard/stream': {
+    get: {
+      tags: ['Dashboard'],
+      summary: 'Live updates (Server-Sent Events)',
+      description:
+        'Long-lived `text/event-stream`. Events:\n\n' +
+        '- `status` `{ connected, error }` - PostgreSQL connectivity\n' +
+        '- `change` `{ tables[], at }` - rows changed in `call_audit_logs`, `call_events`, `consignments` or `delivery_attempts` (any writer, via PostgreSQL LISTEN/NOTIFY)\n\n' +
+        'Comment heartbeats every 20 s. Swagger "Try it out" cannot display a stream; open it in a browser tab or use `curl -N`.',
+      operationId: 'dashboardStream',
+      security: [{ cookieAuth: [] }],
+      responses: {
+        200: { description: 'Event stream', content: { 'text/event-stream': { schema: { type: 'string' }, example: 'event: change\ndata: {"tables":["consignments"],"at":"2026-11-12T11:05:00.000Z"}\n\n' } } },
+        401: R401,
       },
     },
   },

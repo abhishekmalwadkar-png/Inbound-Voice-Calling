@@ -18,6 +18,24 @@ CREATE INDEX IF NOT EXISTS idx_call_events_type ON call_events (event_type);
 
 -- Last-activity timestamp used to order the live audit log and CSV export.
 ALTER TABLE call_audit_logs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+-- Caller identity verification outcome per call:
+--   VERIFIED      phone matched (ANI / ANI_MULTI) or consignment number / DOB accepted
+--   NOT_VERIFIED  failed twice, or the call ended / was transferred before verifying
+--   PENDING       verification asked, call still in progress
+ALTER TABLE call_audit_logs ADD COLUMN IF NOT EXISTS verification_status VARCHAR(20);
+ALTER TABLE call_audit_logs ADD COLUMN IF NOT EXISTS verification_attempts INTEGER DEFAULT 0;
+
+-- One-time backfill for rows written before these columns existed (or by other systems).
+UPDATE call_audit_logs
+   SET verification_status = CASE
+         WHEN validation_method IN ('ANI', 'ANI_MATCH', 'ANI_MULTI', 'CONSIGNMENT', 'CONSIGNMENT_NUMBER', 'DOB') THEN 'VERIFIED'
+         WHEN validation_method = 'FAILED' THEN 'NOT_VERIFIED'
+         WHEN disposition = 'IN_PROGRESS' THEN 'PENDING'
+         ELSE 'NOT_VERIFIED'
+       END
+ WHERE verification_status IS NULL;
+CREATE INDEX IF NOT EXISTS idx_call_audit_verification ON call_audit_logs (verification_status);
 CREATE INDEX IF NOT EXISTS idx_call_audit_created ON call_audit_logs (created_at DESC);
 
 -- Caller lookup matches on the last 10 digits so +91 / 0 / bare formats all match.

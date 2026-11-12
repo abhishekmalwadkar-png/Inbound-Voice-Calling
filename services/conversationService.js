@@ -45,8 +45,10 @@ const PROMPTS = Object.freeze({
   menu:
     'You can ask for current status, expected delivery date, past attempt history, or press 9 to speak with an agent. ' +
     'You can also press 1 for status, 2 for delivery date, 3 for attempt history, or 4 for documents required at delivery.',
-  verify:
-    'Please enter or speak your consignment tracking number, or your 8-digit date of birth in day, month, year format, followed by the hash key.',
+  // Verification order per PPT slide 16: consignment number first; date of birth only when
+  // the consignment is not linked to the calling number.
+  askConsignment: 'Please enter or speak your consignment tracking number, followed by the hash key.',
+  askDob: 'For security, please enter or speak your 8-digit date of birth in day, month, year format, followed by the hash key.',
   followUp: 'Is there anything else I can help you with today? You can ask another question, or say no, or press 0, to end the call.',
   transfer: 'Transferring your call to a customer care representative. Please stay on the line.',
   goodbye: 'Thank you for calling CCD Delivery Helpline. Have a great day. Goodbye.',
@@ -58,7 +60,10 @@ const PROMPTS = Object.freeze({
   noInput: 'Sorry, I did not hear anything.',
   stillThere: 'Are you still there?',
   systemError: 'We are sorry, we are having trouble retrieving your delivery details right now.',
-  unknownCaller: 'Welcome to CCD Delivery Helpline. We could not find a delivery linked to the number you are calling from.',
+  // PPT slide 18: with no agent configured, the bot apologises and ends the call.
+  noAgent: 'We are sorry, we are unable to connect you to a customer care representative at the moment. Thank you for calling CCD. Goodbye.',
+  unknownCaller: 'Welcome to CCD Delivery Helpline. We could not automatically match your phone number.',
+  multipleMatches: 'Welcome to CCD Delivery Helpline. We found more than one delivery linked to your number.',
 });
 
 // -----------------------------------------------------------------------------
@@ -93,27 +98,25 @@ function followUpGather(prefix = []) {
   return tw.gather({ prompts: [...prefix, PROMPTS.followUp], action: ROUTES.menu, numDigits: 1 });
 }
 
-function verifyGather(prefix = []) {
+/** Verification <Gather>: step 'CONSIGNMENT' asks for the consignment number, 'DOB' for the date of birth. */
+function verifyGather(step, prefix = []) {
+  const dob = step === 'DOB';
   return tw.gather({
-    prompts: [...prefix, PROMPTS.verify],
+    prompts: [...prefix, dob ? PROMPTS.askDob : PROMPTS.askConsignment],
     action: ROUTES.verify,
     finishOnKey: '#',
     timeout: settings().verifyTimeoutSeconds,
-    hints: 'C C D, consignment number, date of birth, January, February, March, April, May, June, July, August, September, October, November, December',
+    hints: dob
+      ? 'January, February, March, April, May, June, July, August, September, October, November, December'
+      : 'C C D, consignment number',
   });
-}
-
-function disambiguationGather(candidates, prefix = []) {
-  return tw.gather({ prompts: [...prefix, rb.disambiguationMenu(candidates)], action: ROUTES.menu, numDigits: 1 });
 }
 
 /** Re-asks whatever the caller was last asked. */
 function stagePrompt(session, prefix = []) {
   switch (session.stage) {
     case STAGES.VERIFY:
-      return verifyGather(prefix);
-    case STAGES.DISAMBIGUATE:
-      return disambiguationGather(session.candidates, prefix);
+      return verifyGather(session.verifyStep || 'CONSIGNMENT', prefix);
     case STAGES.FOLLOW_UP:
       return followUpGather(prefix);
     case STAGES.MAIN_MENU:
@@ -135,37 +138,57 @@ async function selectConsignment(session, consignment, validationMethod) {
   session.consignment = consignment;
   session.candidates = [];
   session.validationMethod = validationMethod;
+  session.verified = true;
   session.stage = STAGES.MAIN_MENU;
   resetCounters(session);
   await audit(session.callSid, {
     callerPhone: session.callerPhone,
     consignmentId: consignment.consignment_id,
     validationMethod,
+    verificationStatus: 'VERIFIED',
     disposition: 'IN_PROGRESS',
   });
   await event(session.callSid, 'VALIDATED', { method: validationMethod, consignmentId: consignment.consignment_id });
 }
 
-async function enterDisambiguation(session, candidates, validationMethod) {
-  session.stage = STAGES.DISAMBIGUATE;
-  session.candidates = candidates.slice(0, 8);
-  session.pendingValidationMethod = validationMethod;
-  resetCounters(session);
-  await event(session.callSid, 'DISAMBIGUATION_OFFERED', {
-    options: session.candidates.map((c) => c.consignment_id),
-    method: validationMethod,
-  });
+/** True when a live agent destination (E.164 number or sip: URI) is configured for this request. */
+function agentConfigured() {
+  const destination = String(settings().agentNumber || '').trim();
+  return tw.isE164(destination) || /^sip:[^\s@]+@\S+$/i.test(destination);
+}
+
+/** TwiML for unexpected failures: transfer to an agent, or apologise and end the call if none is configured. */
+function errorTwiml() {
+  return agentConfigured()
+    ? tw.transferToAgent({ prompts: [PROMPTS.systemError, PROMPTS.transfer] })
+    : tw.hangup([PROMPTS.systemError, PROMPTS.noAgent]);
 }
 
 async function transfer(session, reason, prefix = []) {
-  session.stage = STAGES.TRANSFERRED;
   session.escalationReason = reason;
+  if (!agentConfigured()) {
+    // PPT slide 18: no agent configured -> apologise and end the call.
+    session.stage = STAGES.ENDED;
+    await audit(session.callSid, {
+      callerPhone: session.callerPhone,
+      consignmentId: session.consignment ? session.consignment.consignment_id : null,
+      intentDetected: reason === ESCALATION_REASONS.CUSTOMER_REQUEST ? 'AGENT_REQUEST' : undefined,
+      disposition: 'AGENT_UNAVAILABLE',
+      escalationReason: reason,
+      durationSeconds: sessions.durationSeconds(session),
+      verificationStatus: session.verified ? undefined : 'NOT_VERIFIED',
+    });
+    await event(session.callSid, 'ESCALATION', { reason, agentConfigured: false });
+    return tw.hangup([...prefix, PROMPTS.noAgent]);
+  }
+  session.stage = STAGES.TRANSFERRED;
   await audit(session.callSid, {
     callerPhone: session.callerPhone,
     consignmentId: session.consignment ? session.consignment.consignment_id : null,
     intentDetected: reason === ESCALATION_REASONS.CUSTOMER_REQUEST ? 'AGENT_REQUEST' : undefined,
     disposition: 'AGENT_TRANSFERRED',
     escalationReason: reason,
+    verificationStatus: session.verified ? undefined : 'NOT_VERIFIED',
   });
   await event(session.callSid, 'ESCALATION', { reason });
   return tw.transferToAgent({ prompts: [...prefix, PROMPTS.transfer], action: ROUTES.dialStatus });
@@ -174,7 +197,11 @@ async function transfer(session, reason, prefix = []) {
 async function endCall(session, prefix = []) {
   const disposition = session.intents.length ? 'BOT_RESOLVED' : 'CALLER_ENDED';
   session.stage = STAGES.ENDED;
-  await audit(session.callSid, { disposition, durationSeconds: sessions.durationSeconds(session) });
+  await audit(session.callSid, {
+    disposition,
+    durationSeconds: sessions.durationSeconds(session),
+    verificationStatus: session.verified ? undefined : 'NOT_VERIFIED',
+  });
   await event(session.callSid, 'CALL_ENDED', { disposition });
   return tw.hangup([...prefix, PROMPTS.goodbye]);
 }
@@ -190,7 +217,7 @@ async function systemFailure(session, err) {
 
 async function startCall({ callSid, callerPhone }) {
   const session = sessions.create(callSid, { callerPhone });
-  await audit(callSid, { callerPhone, disposition: 'IN_PROGRESS' });
+  await audit(callSid, { callerPhone, disposition: 'IN_PROGRESS', verificationStatus: 'PENDING' });
 
   let rows;
   try {
@@ -211,24 +238,24 @@ async function startCall({ callSid, callerPhone }) {
     };
   }
 
+  // Unknown number, or one linked to several consignments: secondary verification (PPT slide 16).
+  session.stage = STAGES.VERIFY;
+  session.verifyStep = 'CONSIGNMENT';
   if (rows.length > 1) {
-    await enterDisambiguation(session, rows, 'ANI_MULTI');
     return {
       matchType: 'MULTIPLE',
-      callerVerified: true,
+      callerVerified: false,
       consignments: rows.map(rb.toPublicConsignment),
-      nextAction: 'DISAMBIGUATE',
-      twiml: disambiguationGather(session.candidates, ['Welcome to CCD Delivery Helpline.']),
+      nextAction: 'SECONDARY_VERIFICATION',
+      twiml: verifyGather('CONSIGNMENT', [PROMPTS.multipleMatches]),
     };
   }
-
-  session.stage = STAGES.VERIFY;
   return {
     matchType: 'NONE',
     callerVerified: false,
     consignments: [],
     nextAction: 'SECONDARY_VERIFICATION',
-    twiml: verifyGather([PROMPTS.unknownCaller]),
+    twiml: verifyGather('CONSIGNMENT', [PROMPTS.unknownCaller]),
   };
 }
 
@@ -268,27 +295,8 @@ async function answerIntent(session, intent) {
   return { intent, spokenText, twiml: followUpGather([spokenText]) };
 }
 
-async function handleDisambiguation(session, input) {
-  let index = -1;
-  if (input.kind === 'DTMF') {
-    const n = parseInt(input.value.charAt(0), 10);
-    if (n === 9 && session.candidates.length < 9) return transfer(session, ESCALATION_REASONS.CUSTOMER_REQUEST);
-    if (n >= 1 && n <= session.candidates.length) index = n - 1;
-  } else {
-    const intent = sp.detectIntent(input.value);
-    if (intent === INTENTS.AGENT) return transfer(session, ESCALATION_REASONS.CUSTOMER_REQUEST);
-    index = sp.matchDisambiguation(input.value, session.candidates, f.describeItem);
-  }
-
-  if (index < 0) return handleUnclear(session, { reason: 'INVALID_SELECTION' });
-
-  const chosen = session.candidates[index];
-  await selectConsignment(session, chosen, session.pendingValidationMethod || 'ANI_MULTI');
-  return menuGather([`Thank you. You selected your ${rb.itemSentence(chosen)}.`]);
-}
-
 /**
- * POST /api/telephony/menu-selection — main menu, follow-up and disambiguation.
+ * POST /api/telephony/menu-selection — main menu and follow-up.
  */
 async function handleMenuSelection({ callSid, callerPhone, digits, speech, confidence }) {
   const session = sessions.get(callSid);
@@ -312,7 +320,6 @@ async function handleMenuSelection({ callSid, callerPhone, digits, speech, confi
       confidence: input.confidence,
     });
 
-    if (session.stage === STAGES.DISAMBIGUATE) return await handleDisambiguation(session, input);
     if (!session.consignment) return (await startCall({ callSid, callerPhone: session.callerPhone || callerPhone })).twiml;
 
     const intent = input.kind === 'DTMF' ? sp.intentFromDigit(input.value) : sp.detectIntent(input.value);
@@ -350,86 +357,40 @@ async function handleMenuSelection({ callSid, callerPhone, digits, speech, confi
 // Scenario 2: secondary identity verification
 // -----------------------------------------------------------------------------
 
-/** Validates a consignment number or DOB against PostgreSQL. */
-async function verifyIdentity({ input, type = 'AUTO', callerPhone }) {
-  const parsed = sp.parseVerificationInput(input, type);
+function linkedToCaller(row, callerPhone) {
+  const caller = f.last10Digits(callerPhone);
+  return caller.length === 10 && f.last10Digits(row.customer_phone) === caller;
+}
 
-  if (parsed.consignmentNumber) {
-    const row = await db.lookupByConsignmentNumber(parsed.consignmentNumber);
-    if (row) return { verified: true, method: 'CONSIGNMENT', matches: [row] };
-  }
-
-  if (parsed.dob) {
-    let rows = callerPhone ? await db.verifyByDob(callerPhone, parsed.dob) : [];
-    if (!rows.length) rows = await db.verifyByDob(null, parsed.dob);
-    // A DOB alone is only accepted when it resolves to exactly one customer.
-    const owners = new Set(rows.map((r) => f.last10Digits(r.customer_phone)));
-    if (rows.length && owners.size === 1) return { verified: true, method: 'DOB', matches: rows };
-  }
-
+async function verificationPassed(session, row, method) {
+  session.verifyStep = null;
+  session.pendingConsignment = null;
+  session.verifyFailures = 0;
+  await event(session.callSid, 'VERIFICATION_PASSED', { method, consignmentId: row.consignment_id });
+  await selectConsignment(session, row, method);
   return {
-    verified: false,
-    method: parsed.dob && !parsed.consignmentNumber ? 'DOB' : 'CONSIGNMENT',
-    matches: [],
-    parsed: { consignmentNumber: Boolean(parsed.consignmentNumber), dob: Boolean(parsed.dob) },
+    verified: true,
+    attemptCount: session.verifyEntries,
+    escalateToAgent: false,
+    validationMethod: method,
+    consignment: rb.toPublicConsignment(row),
+    consignments: [rb.toPublicConsignment(row)],
+    nextAction: 'MAIN_MENU',
+    twiml: menuGather([PROMPTS.verified, `We found your ${rb.itemSentence(row)}.`]),
   };
 }
 
-/**
- * Applies a verification attempt to the call session and returns the next TwiML.
- * Used by both the Twilio Gather action and POST /api/workflow/verify-secondary.
- */
-async function processVerification({ callSid, callerPhone, input, type = 'AUTO', attemptCount }) {
-  const session = sessions.getOrCreate(callSid, { callerPhone, stage: STAGES.VERIFY });
-  if (callerPhone && !session.callerPhone) session.callerPhone = callerPhone;
-  session.stage = STAGES.VERIFY;
+/** A failed check. Two failures escalate to a live agent (PPT slide 16). */
+async function verificationFailed(session, step, attemptCount) {
+  const failures = Number.isFinite(attemptCount) && attemptCount > 0 ? attemptCount : (session.verifyFailures || 0) + 1;
+  session.verifyFailures = failures;
+  await event(session.callSid, 'VERIFICATION_FAILED', { step, failures });
 
-  const attempt = Number.isFinite(attemptCount) && attemptCount > 0 ? attemptCount : session.verifyAttempts + 1;
-  session.verifyAttempts = attempt;
-
-  await audit(callSid, { callerPhone: session.callerPhone, disposition: 'IN_PROGRESS' });
-
-  const result = await verifyIdentity({ input, type, callerPhone: session.callerPhone });
-  await event(callSid, result.verified ? 'VERIFICATION_PASSED' : 'VERIFICATION_FAILED', {
-    method: result.method,
-    attempt,
-    inputType: String(type).toUpperCase(),
-  });
-
-  if (result.verified) {
-    session.verifyAttempts = 0;
-    if (result.matches.length === 1) {
-      const c = result.matches[0];
-      await selectConsignment(session, c, result.method);
-      return {
-        verified: true,
-        attemptCount: attempt,
-        escalateToAgent: false,
-        validationMethod: result.method,
-        consignment: rb.toPublicConsignment(c),
-        consignments: [rb.toPublicConsignment(c)],
-        nextAction: 'MAIN_MENU',
-        twiml: menuGather([PROMPTS.verified, `We found your ${rb.itemSentence(c)}.`]),
-      };
-    }
-    await enterDisambiguation(session, result.matches, result.method);
-    return {
-      verified: true,
-      attemptCount: attempt,
-      escalateToAgent: false,
-      validationMethod: result.method,
-      consignment: null,
-      consignments: result.matches.map(rb.toPublicConsignment),
-      nextAction: 'DISAMBIGUATE',
-      twiml: disambiguationGather(session.candidates, [PROMPTS.verified]),
-    };
-  }
-
-  if (attempt >= 2) {
-    await audit(callSid, { validationMethod: 'FAILED' });
+  if (failures >= 2) {
+    await audit(session.callSid, { validationMethod: 'FAILED', verificationStatus: 'NOT_VERIFIED', verificationAttempts: session.verifyEntries });
     return {
       verified: false,
-      attemptCount: attempt,
+      attemptCount: failures,
       escalateToAgent: true,
       validationMethod: 'FAILED',
       consignment: null,
@@ -438,17 +399,74 @@ async function processVerification({ callSid, callerPhone, input, type = 'AUTO',
       twiml: await transfer(session, ESCALATION_REASONS.VERIFICATION_FAILURE, [PROMPTS.verifyFailed]),
     };
   }
-
   return {
     verified: false,
-    attemptCount: attempt,
+    attemptCount: failures,
     escalateToAgent: false,
     validationMethod: null,
     consignment: null,
     consignments: [],
-    nextAction: 'RETRY_VERIFICATION',
-    twiml: verifyGather([PROMPTS.verifyRetry]),
+    nextAction: session.verifyStep === 'DOB' ? 'RETRY_DOB' : 'RETRY_CONSIGNMENT',
+    twiml: verifyGather(session.verifyStep || 'CONSIGNMENT', [PROMPTS.verifyRetry]),
   };
+}
+
+/**
+ * Secondary verification (PPT slide 16): the caller is asked for the consignment number;
+ * if it does not match the caller's number, a date-of-birth check follows. Two failures escalate.
+ * Used by both the Twilio Gather action and POST /api/workflow/verify-secondary.
+ */
+async function processVerification({ callSid, callerPhone, input, type = 'AUTO', attemptCount }) {
+  const session = sessions.getOrCreate(callSid, { callerPhone, stage: STAGES.VERIFY });
+  if (callerPhone && !session.callerPhone) session.callerPhone = callerPhone;
+  session.stage = STAGES.VERIFY;
+
+  const requested = String(type || 'AUTO').toUpperCase();
+  let step = session.verifyStep || 'CONSIGNMENT';
+  if (requested === 'CONSIGNMENT' || requested === 'DOB') step = requested;
+  if (step === 'DOB' && !session.pendingConsignment) {
+    const err = new Error('The date-of-birth check follows the consignment number. Submit the consignment number for this callSid first.');
+    err.status = 400;
+    throw err;
+  }
+  session.verifyStep = step;
+
+  session.verifyEntries = (session.verifyEntries || 0) + 1;
+  await audit(callSid, {
+    callerPhone: session.callerPhone,
+    disposition: 'IN_PROGRESS',
+    verificationAttempts: session.verifyEntries,
+    verificationStatus: session.verified ? undefined : 'PENDING',
+  });
+
+  if (step === 'CONSIGNMENT') {
+    const number = sp.parseConsignmentNumber(input);
+    const row = number ? await db.lookupByConsignmentNumber(number) : null;
+    if (!row) return verificationFailed(session, 'CONSIGNMENT', attemptCount);
+    if (linkedToCaller(row, session.callerPhone)) return verificationPassed(session, row, 'CONSIGNMENT');
+
+    // Valid consignment, but not linked to the calling number: date-of-birth check follows.
+    session.pendingConsignment = row;
+    session.verifyStep = 'DOB';
+    await event(callSid, 'DOB_CHECK_REQUIRED', { consignmentId: row.consignment_id });
+    return {
+      verified: false,
+      attemptCount: (session.verifyFailures || 0) + 1,
+      escalateToAgent: false,
+      validationMethod: null,
+      consignment: null,
+      consignments: [],
+      nextAction: 'DOB_REQUIRED',
+      twiml: verifyGather('DOB', ['Thank you.']),
+    };
+  }
+
+  // step === 'DOB': must match the date of birth on the consignment given in the previous step.
+  const row = session.pendingConsignment;
+  const dob = sp.parseDob(input);
+  const matches = dob ? await db.verifyByDob(row.consignment_id, dob) : [];
+  if (matches.length) return verificationPassed(session, row, 'DOB');
+  return verificationFailed(session, 'DOB', attemptCount);
 }
 
 /** POST /api/telephony/verify-input */
@@ -535,7 +553,8 @@ module.exports = {
   handleMenuSelection,
   handleVerifyInput,
   processVerification,
-  verifyIdentity,
+  agentConfigured,
+  errorTwiml,
   handleDialStatus,
   handleStatusCallback,
   attachConsignmentToCall,
