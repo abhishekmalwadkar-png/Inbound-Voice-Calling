@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CCD Voice Console</title>
+  <style>
+    :root {
+      color-scheme: light;
+      /* Surfaces */
+      --bg: #fffaf6;
+      --surface: #ffffff;
+      --surface-2: #fff6ef;
+      --surface-3: #fff0e4;
+      --border: #f2e5da;
+      --border-strong: #ead2bf;
+      /* Text */
+      --text: #2a1f17;
+      --text-2: #66574b;
+      --muted: #9a8a7d;
+      /* Brand orange */
+      --orange-50: #fff6ef;
+      --orange-100: #ffe8d6;
+      --orange-200: #ffd0ad;
+      --orange-300: #ffb27f;
+      --orange-500: #f97316;
+      --orange-600: #e8590c;
+      --orange-700: #c2410c;
+      --accent: var(--orange-600);
+      --accent-ink: #ffffff;
+      --grad: linear-gradient(135deg, #fb8a3c 0%, #e8590c 55%, #c2410c 100%);
+      /* Chart series (validated order) */
+      --series-1: #eb6834;
+      --series-2: #2a78d6;
+      --series-3: #1baf7a;
+      --series-4: #eda100;
+      --series-5: #e87ba4;
+      --neutral-mark: #c9bfb6;
+      /* State */
+      --good: #1d7a3e;
+      --critical: #b42318;
+      /* Depth */
+      --radius: 14px;
+      --shadow-sm: 0 1px 2px rgba(80, 40, 10, .05), 0 1px 1px rgba(80, 40, 10, .03);
+      --shadow-lift: 0 22px 44px -22px rgba(232, 89, 12, .45), 0 8px 18px -10px rgba(80, 40, 10, .12);
+      --ease: cubic-bezier(.2, .8, .2, 1);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(900px 420px at 100% -10%, rgba(249, 115, 22, .10), transparent 60%),
+        radial-gradient(700px 380px at -10% 0%, rgba(255, 178, 127, .14), transparent 60%),
+        var(--bg);
+      background-attachment: fixed;
+      font: 14px/1.5 "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    [hidden] { display: none !important; }
+    button, input, select { font: inherit; color: inherit; }
+    code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: var(--orange-50); padding: 1px 5px; border-radius: 5px; color: var(--orange-700); }
+
+    /* ---------------------------------------------------------------- Header */
+    .topbar {
+      position: sticky; top: 0; z-index: 20;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px;
+      padding: 12px 28px;
+      background: rgba(255, 255, 255, .86);
+      backdrop-filter: saturate(160%) blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--grad); opacity: .9; }
+    .brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+    .logo {
+      width: 40px; height: 40px; border-radius: 12px; background: var(--grad); color: #fff;
+      display: grid; place-items: center; font-weight: 800; font-size: 13px; letter-spacing: .5px;
+      box-shadow: 0 8px 18px -8px rgba(232, 89, 12, .7);
+    }
+    .brand h1 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+    .brand p { margin: 0; font-size: 12.5px; color: var(--text-2); }
+
+    .tabs { display: flex; gap: 4px; padding: 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; }
+    .tab {
+      display: inline-flex; align-items: center; gap: 7px;
+      border: 0; background: none; cursor: pointer; padding: 7px 16px; border-radius: 9px;
+      color: var(--text-2); font-weight: 600; font-size: 13.5px; transition: background .2s, color .2s, box-shadow .2s;
+    }
+    .tab svg { width: 16px; height: 16px; }
+    .tab:hover { color: var(--orange-700); }
+    .tab[aria-selected="true"] { background: var(--surface); color: var(--orange-700); box-shadow: 0 2px 8px -2px rgba(232, 89, 12, .3); }
+
+    .header-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 999px;
+      background: var(--surface); border: 1px solid var(--border); font-size: 12.5px; color: var(--text-2); font-weight: 500;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--neutral-mark); }
+    .dot.ok { background: var(--good); box-shadow: 0 0 0 4px rgba(29, 122, 62, .12); animation: pulse 2.4s infinite; }
+    .dot.bad { background: var(--critical); box-shadow: 0 0 0 4px rgba(180, 35, 24, .12); }
+    @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 3px rgba(29, 122, 62, .14); } 50% { box-shadow: 0 0 0 6px rgba(29, 122, 62, .04); } }
+    .refresh { font-size: 12px; color: var(--muted); }
+    .user { display: flex; align-items: center; gap: 8px; }
+    .avatar {
+      width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+      background: var(--orange-100); color: var(--orange-700); font-weight: 700; font-size: 13px; text-transform: uppercase;
+      border: 1px solid var(--orange-200);
+    }
+
+    /* ---------------------------------------------------------------- Buttons & inputs */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px; white-space: nowrap;
+      padding: 8px 14px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface);
+      color: var(--text); font-weight: 600; font-size: 13px; cursor: pointer;
+      transition: transform .15s var(--ease), box-shadow .2s, background .2s, border-color .2s, color .2s;
+    }
+    .btn svg { width: 16px; height: 16px; flex: none; }
+    .btn:hover:not(:disabled) { border-color: var(--orange-300); color: var(--orange-700); background: var(--orange-50); }
+    .btn:active:not(:disabled) { transform: translateY(1px); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn.primary { background: var(--grad); color: #fff; border-color: transparent; box-shadow: 0 8px 16px -10px rgba(194, 65, 12, .9); }
+    .btn.primary:hover:not(:disabled) { color: #fff; background: var(--grad); box-shadow: 0 12px 22px -10px rgba(194, 65, 12, .95); transform: translateY(-1px); }
+    .btn.danger { color: var(--critical); }
+    .btn.danger:hover:not(:disabled) { color: var(--critical); border-color: #f3b3ac; background: #fdf1ef; }
+    .btn.ghost { border-color: transparent; background: transparent; }
+    .btn.sm { padding: 6px 11px; font-size: 12.5px; border-radius: 9px; }
+
+    .field-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 5px; }
+    .input, select.input {
+      width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border-strong);
+      background: var(--surface); color: var(--text); transition: border-color .2s, box-shadow .2s;
+    }
+    .input::placeholder { color: var(--muted); }
+    .input:focus { outline: none; border-color: var(--orange-500); box-shadow: 0 0 0 4px rgba(249, 115, 22, .14); }
+    .input:disabled { background: var(--surface-2); color: var(--muted); }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row > .grow { flex: 1; min-width: 0; }
+    .stack { display: grid; gap: 12px; }
+
+    /* ---------------------------------------------------------------- Layout */
+    main { max-width: 1480px; margin: 0 auto; padding: 26px 28px 48px; display: grid; gap: 26px; }
+    .page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
+    .page-head h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+    .page-head p { margin: 2px 0 0; color: var(--text-2); }
+    .section-label { display: flex; align-items: center; gap: 10px; margin: 0 0 -12px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--orange-700); }
+    .section-label::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--orange-200), transparent); }
+
+    .card {
+      position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 18px 20px; box-shadow: var(--shadow-sm); min-width: 0;
+    }
+    .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .card-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
+    .card-head p { margin: 2px 0 0; color: var(--text-2); font-size: 12.5px; }
+    .card-icon {
+      width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex: none;
+      background: var(--orange-50); color: var(--orange-600); border: 1px solid var(--orange-100);
+    }
+    .card-icon svg { width: 18px; height: 18px; }
+    .title-row { display: flex; gap: 12px; align-items: flex-start; }
+
+    /* Floating hover effect for KPI tiles and chart cards */
+    .float {
+      transition: transform .4s var(--ease), box-shadow .4s var(--ease), border-color .4s var(--ease);
+      will-change: transform;
+    }
+    .float:hover {
+      transform: translateY(-6px);
+      box-shadow: var(--shadow-lift);
+      border-color: var(--orange-200);
+      animation: hover-float 2.6s ease-in-out .4s infinite;
+    }
+    @keyframes hover-float {
+      0%, 100% { transform: translateY(-6px); }
+      50% { transform: translateY(-11px); }
+    }
+
+    /* Entrance animation */
+    .reveal { animation: rise .6s var(--ease) both; }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+    /* ---------------------------------------------------------------- KPI tiles */
+    .kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; }
+    .kpi { overflow: hidden; padding: 18px; }
+    .kpi::before {
+      content: ""; position: absolute; left: 0; top: 0; right: 0; height: 3px; background: var(--grad);
+      transform: scaleX(0); transform-origin: left; transition: transform .45s var(--ease);
+    }
+    .kpi:hover::before { transform: scaleX(1); }
+    .kpi .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .kpi .label { color: var(--text-2); font-size: 12.5px; font-weight: 600; }
+    .kpi .icon {
+      width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center;
+      background: var(--orange-50); color: var(--orange-600); border: 1px solid var(--orange-100);
+      transition: transform .45s var(--ease), background .3s, color .3s;
+    }
+    .kpi .icon svg { width: 19px; height: 19px; }
+    .kpi:hover .icon { transform: rotate(-8deg) scale(1.08); background: var(--grad); color: #fff; border-color: transparent; }
+    .kpi .value { font-size: 30px; font-weight: 750; letter-spacing: -.02em; margin-top: 10px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .kpi .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+    /* ---------------------------------------------------------------- Charts */
+    .charts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .chart-box { position: relative; height: 270px; }
+    .chart-empty {
+      position: absolute; inset: 0; display: none; flex-direction: column; gap: 6px; align-items: center; justify-content: center;
+      color: var(--muted); font-size: 13px; text-align: center; padding: 16px; background: var(--surface);
+    }
+    .chart-empty svg { width: 30px; height: 30px; color: var(--orange-300); }
+    .chart-empty.show { display: flex; }
+
+    /* ---------------------------------------------------------------- Phone + live log */
+    .split { display: grid; grid-template-columns: minmax(340px, 430px) minmax(0, 1fr); gap: 16px; align-items: start; }
+
+    .phone-head {
+      margin: -18px -20px 16px; padding: 16px 20px; border-radius: var(--radius) var(--radius) 0 0;
+      background: var(--grad); color: #fff; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+    .phone-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
+    .phone-head p { margin: 2px 0 0; font-size: 12px; opacity: .92; }
+    .phone-head .state { font-size: 11.5px; font-weight: 600; background: rgba(255, 255, 255, .2); padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+    .state-chip { font-size: 12px; color: var(--text-2); padding: 0 2px; }
+    .state-chip strong { color: var(--orange-700); font-weight: 600; }
+
+    .transcript {
+      height: 300px; overflow-y: auto; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 9px;
+      background: linear-gradient(180deg, var(--surface-2), #fff); border: 1px solid var(--border);
+    }
+    .msg { max-width: 86%; padding: 8px 12px; border-radius: 14px; font-size: 13px; white-space: pre-wrap; animation: rise .3s var(--ease) both; }
+    .msg.bot { background: #fff; border: 1px solid var(--border); align-self: flex-start; border-top-left-radius: 4px; box-shadow: var(--shadow-sm); }
+    .msg.user { background: var(--orange-100); border: 1px solid var(--orange-200); align-self: flex-end; border-top-right-radius: 4px; }
+    .msg.sys { align-self: center; color: var(--muted); font-size: 11.5px; background: none; padding: 0 6px; text-align: center; }
+    .msg .who { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--orange-700); margin-bottom: 2px; }
+    .msg.user .who { color: var(--text-2); }
+
+    .dialpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+    .dialpad .btn { padding: 10px 0; font-size: 17px; font-weight: 700; border-radius: 12px; font-variant-numeric: tabular-nums; }
+    .digit-buffer {
+      flex: 1; min-height: 38px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface-2);
+      font: 700 16px/1.2 ui-monospace, Consolas, monospace; letter-spacing: 3px; color: var(--orange-700);
+    }
+    .toggles { display: grid; gap: 8px; font-size: 12.5px; color: var(--text-2); padding-top: 4px; border-top: 1px dashed var(--border); }
+    .toggles label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+    .toggles input[type=checkbox] { accent-color: var(--orange-600); width: 15px; height: 15px; }
+
+    /* ---------------------------------------------------------------- Tables */
+    .table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 12px; }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+    th, td { text-align: left; padding: 11px 14px; white-space: nowrap; border-bottom: 1px solid var(--border); }
+    thead th {
+      position: sticky; top: 0; z-index: 1; background: var(--surface-2);
+      color: var(--text-2); font-size: 11.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+    }
+    tbody tr { transition: background .15s; }
+    tbody tr:nth-child(even) td { background: #fffcfa; }
+    tbody tr:hover td { background: var(--orange-50); }
+    tbody tr:last-child td { border-bottom: 0; }
+    td.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--text-2); }
+    td.muted { color: var(--muted); }
+    .empty-row td { color: var(--muted); text-align: center; padding: 28px; background: #fff !important; }
+
+    th.sortable { cursor: pointer; user-select: none; }
+    th.sortable:hover { color: var(--orange-700); }
+    th.sortable .arrow { display: inline-block; margin-left: 4px; opacity: .35; transition: transform .2s, opacity .2s; }
+    th.sortable[aria-sort="ascending"] .arrow, th.sortable[aria-sort="descending"] .arrow { opacity: 1; color: var(--orange-600); }
+    th.sortable[aria-sort="ascending"] .arrow { transform: rotate(180deg); }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 999px;
+      font-size: 12px; font-weight: 600; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
+    }
+    .badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--neutral-mark); }
+    .badge.resolved { background: #fff1ea; border-color: #fcd5c2; }
+    .badge.resolved::before { background: var(--series-1); }
+    .badge.transferred { background: #ecf3fc; border-color: #c9ddf6; }
+    .badge.transferred::before { background: var(--series-2); }
+    .badge.abandoned { background: #e9f8f2; border-color: #bfe9d8; }
+    .badge.abandoned::before { background: var(--series-3); }
+
+    /* ---------------------------------------------------------------- Pagination */
+    .table-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; color: var(--text-2); font-size: 12.5px; }
+    .pager { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+    .pager button {
+      min-width: 34px; height: 34px; padding: 0 9px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-2); font-weight: 600; font-size: 13px; cursor: pointer; font-variant-numeric: tabular-nums;
+      transition: background .15s, border-color .15s, color .15s, transform .15s;
+    }
+    .pager button:hover:not(:disabled):not([aria-current="page"]) { border-color: var(--orange-300); color: var(--orange-700); background: var(--orange-50); transform: translateY(-1px); }
+    .pager button[aria-current="page"] { background: var(--grad); color: #fff; border-color: transparent; box-shadow: 0 6px 14px -8px rgba(194, 65, 12, .9); }
+    .pager button:disabled { opacity: .4; cursor: not-allowed; }
+    .pager .gap { padding: 0 4px; color: var(--muted); }
+    .page-size { display: flex; align-items: center; gap: 8px; }
+    .page-size select { width: auto; padding: 6px 10px; }
+
+    /* ---------------------------------------------------------------- Logs filters */
+    .filters { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(140px, 1fr)) auto; gap: 12px; align-items: end; }
+    .filters .actions { display: flex; gap: 8px; }
+
+    /* ---------------------------------------------------------------- Responsive */
+    @media (max-width: 1280px) {
+      .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .filters .search { grid-column: 1 / -1; }
+    }
+    @media (max-width: 1080px) {
+      .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .split { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 680px) {
+      .topbar, main { padding-left: 16px; padding-right: 16px; }
+      .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+      .charts { grid-template-columns: 1fr; }
+      .filters { grid-template-columns: 1fr 1fr; }
+      .kpi .value { font-size: 24px; }
+      .brand p, .refresh { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">CCD</div>
+      <div>
+        <h1>CCD Voice Console</h1>
+        <p>Card &amp; SIM delivery helpline &middot; inbound voice bot</p>
+      </div>
+    </div>
+
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button class="tab" role="tab" id="tabBtnHome" aria-controls="tabHome" aria-selected="true" data-tab="home">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2h-4v-7H9v7H5a2 2 0 0 1-2-2z"/></svg>
+        Home
+      </button>
+      <button class="tab" role="tab" id="tabBtnLogs" aria-controls="tabLogs" aria-selected="false" data-tab="logs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+        Logs
+      </button>
+    </nav>
+
+    <div class="header-meta">
+      <span class="pill"><span class="dot" id="dbDot"></span><span id="dbStatus">Checking database&hellip;</span></span>
+      <span class="refresh" id="lastRefresh">&nbsp;</span>
+      <span class="user">
+        <span class="avatar" id="userAvatar" aria-hidden="true">&middot;</span>
+        <span id="userName" class="sr-name" style="font-weight:600;font-size:13px">&nbsp;</span>
+        <button class="btn sm" id="btnLogout" type="button" title="Sign out">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+          Sign out
+        </button>
+      </span>
+    </div>
+  </header>
+
+  <!-- ================================================================ HOME -->
+  <main id="tabHome" role="tabpanel" aria-labelledby="tabBtnHome">
+    <div class="page-head reveal">
+      <div>
+        <h2>Overview</h2>
+        <p>Live performance of the CCD voice bot, updated the moment PostgreSQL changes.</p>
+      </div>
+    </div>
+
+    <div class="section-label">Key metrics</div>
+    <section class="kpis" aria-label="Key performance indicators">
+      <div class="card kpi float reveal" style="animation-delay:.03s">
+        <div class="top"><span class="label">Containment rate</span>
+          <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></span></div>
+        <div class="value" id="kpiContainment">&ndash;</div>
+        <div class="sub">Calls resolved without an agent</div>
+      </div>
+      <div class="card kpi float reveal" style="animation-delay:.08s">
+        <div class="top"><span class="label">Total calls</span>
+          <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg></span></div>
+        <div class="value" id="kpiTotal">&ndash;</div>
+        <div class="sub" id="kpiTotalSub">&nbsp;</div>
+      </div>
+      <div class="card kpi float reveal" style="animation-delay:.13s">
+        <div class="top"><span class="label">Avg handling time</span>
+          <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div>
+        <div class="value" id="kpiAht">&ndash;</div>
+        <div class="sub">Seconds per call</div>
+      </div>
+      <div class="card kpi float reveal" style="animation-delay:.18s">
+        <div class="top"><span class="label">Validation accuracy</span>
+          <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span></div>
+        <div class="value" id="kpiValidation">&ndash;</div>
+        <div class="sub">Callers verified successfully</div>
+      </div>
+      <div class="card kpi float reveal" style="animation-delay:.23s">
+        <div class="top"><span class="label">Escalation rate</span>
+          <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1v-6h3zM3 19a2 2 0 0 0 2 2h1v-6H3z"/></svg></span></div>
+        <div class="value" id="kpiEscalation">&ndash;</div>
+        <div class="sub">Transferred to a live agent</div>
+      </div>
+      <div class="card kpi float reveal" style="animation-delay:.28s">
+        <div class="top"><span class="label">Est. cost savings</span>
+          <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12M6 8h12M6 13l8.5 8M6 13h3a5 5 0 0 0 0-10"/></svg></span></div>
+        <div class="value" id="kpiSavings">&ndash;</div>
+        <div class="sub" id="kpiSavingsSub">&nbsp;</div>
+      </div>
+    </section>
+
+    <div class="section-label">Analytics</div>
+    <section class="charts" aria-label="Charts">
+      <div class="card float reveal" style="animation-delay:.1s">
+        <div class="card-head"><div class="title-row">
+          <span class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.2 15.9A10 10 0 1 1 8 2.8"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span>
+          <div><h3>Call resolution</h3><p>Outcome of every call</p></div>
+        </div></div>
+        <div class="chart-box"><canvas id="chartResolution" aria-label="Call resolution doughnut chart"></canvas>
+          <div class="chart-empty" id="emptyResolution"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5"/><circle cx="12" cy="16" r=".6" fill="currentColor"/></svg>No calls yet. Calls will appear as they are processed.</div></div>
+      </div>
+      <div class="card float reveal" style="animation-delay:.16s">
+        <div class="card-head"><div class="title-row">
+          <span class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15h4M7 11h9M7 7h6"/></svg></span>
+          <div><h3>Intent distribution</h3><p>What customers asked about</p></div>
+        </div></div>
+        <div class="chart-box"><canvas id="chartIntents" aria-label="Intent distribution bar chart"></canvas>
+          <div class="chart-empty" id="emptyIntents"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5"/><circle cx="12" cy="16" r=".6" fill="currentColor"/></svg>No intents recorded yet.</div></div>
+      </div>
+      <div class="card float reveal" style="animation-delay:.22s">
+        <div class="card-head"><div class="title-row">
+          <span class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/><path d="M3.3 7 12 12l8.7-5M12 22V12"/></svg></span>
+          <div><h3>Consignment status</h3><p>Active consignments in PostgreSQL</p></div>
+        </div></div>
+        <div class="chart-box"><canvas id="chartStatus" aria-label="Consignment status pie chart"></canvas>
+          <div class="chart-empty" id="emptyStatus"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5"/><circle cx="12" cy="16" r=".6" fill="currentColor"/></svg>No consignments found.</div></div>
+      </div>
+    </section>
+
+    <div class="section-label">Live monitoring</div>
+    <section>
+      <!-- Live audit log -->
+      <div class="card reveal" aria-label="Live audit log" style="animation-delay:.18s">
+        <div class="card-head">
+          <div class="title-row">
+            <span class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+            <div><h3>Live audit log</h3><p>Real-time from <code>call_audit_logs</code></p></div>
+          </div>
+          <button type="button" class="btn sm" id="btnViewLogs">
+            View all logs
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th><th>Caller</th><th>Consignment</th><th>Intent</th><th>Duration</th><th>Disposition</th>
+              </tr>
+            </thead>
+            <tbody id="auditBody"><tr class="empty-row"><td colspan="6">Loading&hellip;</td></tr></tbody>
+          </table>
+        </div>
+        <div class="table-foot">
+          <span id="auditSummary">&nbsp;</span>
+          <nav class="pager" id="auditPager" aria-label="Live audit log pages"></nav>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ================================================================ LOGS -->
+  <main id="tabLogs" role="tabpanel" aria-labelledby="tabBtnLogs" hidden>
+    <div class="page-head reveal">
+      <div>
+        <h2>Call logs</h2>
+        <p>Every call recorded in <code>call_audit_logs</code>. Caller numbers are masked, including in the CSV.</p>
+      </div>
+      <button type="button" class="btn primary" id="btnDownloadCsv" title="Download all rows matching the current filters">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        Download CSV
+      </button>
+    </div>
+
+    <section class="card reveal" aria-label="Filters" style="animation-delay:.05s">
+      <form class="filters" id="logFilters">
+        <div class="search">
+          <label class="field-label" for="fSearch">Search</label>
+          <input class="input" type="text" id="fSearch" placeholder="Call SID, consignment, intent, reason&hellip;" autocomplete="off" />
+        </div>
+        <div>
+          <label class="field-label" for="fFrom">From</label>
+          <input class="input" type="date" id="fFrom" />
+        </div>
+        <div>
+          <label class="field-label" for="fTo">To</label>
+          <input class="input" type="date" id="fTo" />
+        </div>
+        <div>
+          <label class="field-label" for="fDisposition">Disposition</label>
+          <select class="input" id="fDisposition">
+            <option value="">All dispositions</option>
+            <option value="BOT_RESOLVED">Bot resolved</option>
+            <option value="CALLER_ENDED">Caller ended</option>
+            <option value="AGENT_TRANSFERRED">Agent transferred</option>
+            <option value="AGENT_UNAVAILABLE">Agent unavailable</option>
+            <option value="ABANDONED">Abandoned</option>
+            <option value="IN_PROGRESS">In progress</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label" for="fValidation">Validation</label>
+          <select class="input" id="fValidation">
+            <option value="">All methods</option>
+            <option value="ANI">ANI (single)</option>
+            <option value="ANI_MULTI">ANI (multiple)</option>
+            <option value="CONSIGNMENT">Consignment #</option>
+            <option value="DOB">Date of birth</option>
+            <option value="FAILED">Failed</option>
+            <option value="WORKFLOW">Workflow</option>
+          </select>
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn primary">Apply</button>
+          <button type="button" class="btn" id="btnResetFilters">Reset</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card reveal" aria-label="Call audit logs" style="animation-delay:.1s">
+      <div class="table-wrap" style="max-height:62vh">
+        <table>
+          <thead>
+            <tr id="logsHead">
+              <th class="sortable" data-sort="createdAt" aria-sort="none">Started<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="updatedAt" aria-sort="descending">Last update<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="callSid" aria-sort="none">Call SID<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="callerPhone" aria-sort="none">Caller<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="consignmentId" aria-sort="none">Consignment<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="validationMethod" aria-sort="none">Validation<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="intentDetected" aria-sort="none">Intent<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="durationSeconds" aria-sort="none">Duration<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="disposition" aria-sort="none">Disposition<span class="arrow">&#9662;</span></th>
+              <th class="sortable" data-sort="escalationReason" aria-sort="none">Escalation reason<span class="arrow">&#9662;</span></th>
+            </tr>
+          </thead>
+          <tbody id="logsBody"><tr class="empty-row"><td colspan="10">Loading&hellip;</td></tr></tbody>
+        </table>
+      </div>
+      <div class="table-foot">
+        <div class="page-size">
+          <span id="logsSummary">&nbsp;</span>
+          <label for="pageSize" class="field-label" style="margin:0 0 0 10px">Rows per page</label>
+          <select class="input" id="pageSize">
+            <option>10</option><option selected>25</option><option>50</option><option>100</option><option>200</option>
+          </select>
+        </div>
+        <nav class="pager" id="logsPager" aria-label="Call log pages"></nav>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>

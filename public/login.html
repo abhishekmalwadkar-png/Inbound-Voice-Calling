@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CCD Voice Console</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #fffaf6;
+      --surface: #ffffff;
+      --surface-2: #fff6ef;
+      --border: #f2e5da;
+      --border-strong: #ead2bf;
+      --text: #2a1f17;
+      --text-2: #66574b;
+      --muted: #9a8a7d;
+      --orange-50: #fff6ef;
+      --orange-100: #ffe8d6;
+      --orange-200: #ffd0ad;
+      --orange-500: #f97316;
+      --orange-600: #e8590c;
+      --orange-700: #c2410c;
+      --grad: linear-gradient(135deg, #fb8a3c 0%, #e8590c 55%, #c2410c 100%);
+      --critical: #b42318;
+      --critical-bg: #fdecea;
+      --ease: cubic-bezier(.2, .8, .2, 1);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+      background: var(--bg); color: var(--text);
+      font: 14px/1.5 "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---------------------------------------------------------------- Brand panel */
+    .hero {
+      position: relative; overflow: hidden; color: #fff; background: var(--grad);
+      display: flex; flex-direction: column; justify-content: space-between; padding: 48px 56px;
+    }
+    .blob { position: absolute; border-radius: 50%; filter: blur(2px); background: rgba(255, 255, 255, .14); animation: drift 14s ease-in-out infinite; }
+    .blob.b1 { width: 340px; height: 340px; right: -90px; top: -80px; }
+    .blob.b2 { width: 220px; height: 220px; left: -60px; bottom: 120px; animation-duration: 18s; animation-delay: -4s; background: rgba(255, 255, 255, .10); }
+    .blob.b3 { width: 120px; height: 120px; right: 22%; bottom: -30px; animation-duration: 11s; animation-delay: -2s; }
+    @keyframes drift {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(-18px, 22px) scale(1.06); }
+    }
+    .hero > *:not(.blob) { position: relative; }
+    .hero-brand { display: flex; align-items: center; gap: 12px; }
+    .hero-logo {
+      width: 44px; height: 44px; border-radius: 13px; background: #fff; color: var(--orange-700);
+      display: grid; place-items: center; font-weight: 800; font-size: 14px; letter-spacing: .5px;
+      box-shadow: 0 10px 24px -10px rgba(0, 0, 0, .35);
+    }
+    .hero-brand strong { display: block; font-size: 16px; }
+    .hero-brand span { font-size: 12.5px; opacity: .9; }
+    .hero h2 { margin: 0 0 12px; font-size: 34px; line-height: 1.15; font-weight: 750; letter-spacing: -.02em; max-width: 460px; }
+    .hero p.lead { margin: 0 0 26px; font-size: 15px; opacity: .94; max-width: 440px; }
+    .features { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; max-width: 440px; }
+    .features li {
+      display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 12px;
+      background: rgba(255, 255, 255, .13); border: 1px solid rgba(255, 255, 255, .22);
+      backdrop-filter: blur(4px); font-size: 13.5px; font-weight: 500;
+      transition: transform .35s var(--ease), background .35s;
+      animation: rise .7s var(--ease) both;
+    }
+    .features li:nth-child(2) { animation-delay: .1s; }
+    .features li:nth-child(3) { animation-delay: .2s; }
+    .features li:hover { transform: translateX(6px); background: rgba(255, 255, 255, .2); }
+    .features svg { width: 20px; height: 20px; flex: none; }
+    .hero-foot { font-size: 12px; opacity: .8; }
+
+    /* ---------------------------------------------------------------- Form panel */
+    .panel { display: grid; place-items: center; padding: 40px 24px; }
+    .card {
+      width: 100%; max-width: 400px; background: var(--surface); border: 1px solid var(--border); border-radius: 18px;
+      padding: 34px 30px; box-shadow: 0 30px 60px -30px rgba(194, 65, 12, .35), 0 2px 6px rgba(80, 40, 10, .05);
+      animation: rise .6s var(--ease) both;
+    }
+    @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+    .card h1 { margin: 0; font-size: 22px; font-weight: 750; letter-spacing: -.02em; }
+    .card .sub { margin: 4px 0 24px; color: var(--text-2); }
+    label { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-2); margin: 16px 0 6px; }
+    .input-wrap { position: relative; }
+    .input-wrap svg.lead-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 17px; height: 17px; color: var(--muted); pointer-events: none; transition: color .2s; }
+    input {
+      width: 100%; padding: 11px 12px 11px 38px; border-radius: 11px; border: 1px solid var(--border-strong);
+      background: var(--surface); color: var(--text); font: inherit; transition: border-color .2s, box-shadow .2s;
+    }
+    input:focus { outline: none; border-color: var(--orange-500); box-shadow: 0 0 0 4px rgba(249, 115, 22, .15); }
+    .input-wrap:focus-within svg.lead-icon { color: var(--orange-600); }
+    .pw input { padding-right: 66px; }
+    .toggle {
+      position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: none; cursor: pointer;
+      color: var(--orange-700); font: inherit; font-size: 12.5px; font-weight: 600; padding: 6px 9px; border-radius: 8px;
+    }
+    .toggle:hover { background: var(--orange-50); }
+    .submit {
+      width: 100%; margin-top: 24px; padding: 12px; border: 0; border-radius: 11px; cursor: pointer;
+      background: var(--grad); color: #fff; font: inherit; font-weight: 700; font-size: 14.5px;
+      box-shadow: 0 12px 24px -12px rgba(194, 65, 12, .9);
+      transition: transform .2s var(--ease), box-shadow .2s var(--ease);
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .submit:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 18px 30px -14px rgba(194, 65, 12, .95); }
+    .submit:active:not(:disabled) { transform: translateY(0); }
+    .submit:disabled { opacity: .7; cursor: progress; }
+    .submit svg { width: 17px; height: 17px; transition: transform .2s; }
+    .submit:hover svg { transform: translateX(3px); }
+    .error {
+      display: none; margin-top: 16px; padding: 10px 12px; border-radius: 10px; gap: 8px; align-items: center;
+      background: var(--critical-bg); color: var(--critical); font-size: 13px; font-weight: 500; border: 1px solid #f6c6c0;
+    }
+    .error.show { display: flex; animation: shake .35s; }
+    @keyframes shake { 25% { transform: translateX(-5px); } 50% { transform: translateX(5px); } 75% { transform: translateX(-3px); } }
+    .error svg { width: 16px; height: 16px; flex: none; }
+    .foot { margin-top: 22px; color: var(--muted); font-size: 12px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .foot svg { width: 14px; height: 14px; }
+
+    @media (max-width: 900px) {
+      body { grid-template-columns: 1fr; }
+      .hero { padding: 28px 22px; gap: 18px; }
+      .hero h2 { font-size: 24px; }
+      .hero p.lead, .features, .hero-foot { display: none; }
+      .panel { padding: 28px 16px 40px; align-items: start; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <section class="hero" aria-hidden="false">
+    <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
+
+    <div class="hero-brand">
+      <div class="hero-logo" aria-hidden="true">CCD</div>
+      <div><strong>CCD Voice Console</strong><span>Card &amp; Consignment Delivery</span></div>
+    </div>
+
+    <div>
+      <h2>Every delivery question, answered in seconds.</h2>
+      <p class="lead">Monitor the inbound voice bot that resolves card and SIM delivery enquiries end to end, without waiting for an agent.</p>
+      <ul class="features">
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/></svg>
+          Live KPIs: containment, handling time, escalations
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg>
+          Virtual phone to test all 13 call scenarios
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Masked, audited call logs with CSV export
+        </li>
+      </ul>
+    </div>
+
+    <div class="hero-foot">Authorised CCD operations staff only.</div>
+  </section>
+
+  <main class="panel">
+    <div class="card">
+      <h1>Welcome back</h1>
+      <p class="sub">Sign in to continue to the dashboard.</p>
+
+      <form id="loginForm" novalidate>
+        <label for="username">Username</label>
+        <div class="input-wrap">
+          <svg class="lead-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+          <input id="username" name="username" type="text" autocomplete="username" required autofocus />
+        </div>
+
+        <label for="password">Password</label>
+        <div class="input-wrap pw">
+          <svg class="lead-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+          <input id="password" name="password" type="password" autocomplete="current-password" required />
+          <button type="button" class="toggle" id="togglePw" aria-label="Show password">Show</button>
+        </div>
+
+        <button class="submit" id="submit" type="submit">
+          <span id="submitText">Sign in</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+        <div class="error" id="error" role="alert">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+          <span id="errorText"></span>
+        </div>
+      </form>
+
+      <p class="foot">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        Secured session &middot; caller data is masked
+      </p>
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      var form = document.getElementById('loginForm');
+      var err = document.getElementById('error');
+      var errText = document.getElementById('errorText');
+      var btn = document.getElementById('submit');
+      var btnText = document.getElementById('submitText');
+      var pw = document.getElementById('password');
+      var next = new URLSearchParams(location.search).get('next') || '/';
+
+      document.getElementById('togglePw').addEventListener('click', function () {
+        var show = pw.type === 'password';
+        pw.type = show ? 'text' : 'password';
+        this.textContent = show ? 'Hide' : 'Show';
+        this.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+      });
+
+      function showError(message) {
+        errText.textContent = message;
+        err.classList.remove('show');
+        void err.offsetWidth; // restart the shake animation
+        err.classList.add('show');
+      }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        err.classList.remove('show');
+        var username = document.getElementById('username').value.trim();
+        if (!username || !pw.value) return showError('Enter your username and password.');
+
+        btn.disabled = true;
+        btnText.textContent = 'Signing in…';
+        fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ username: username, password: pw.value, next: next })
+        })
+          .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, body: body }; }); })
+          .then(function (r) {
+            if (r.ok && r.body.success) { location.replace(r.body.redirect || '/'); return; }
+            showError(r.body.error || 'Sign-in failed.');
+            pw.value = '';
+            pw.focus();
+          })
+          .catch(function () { showError('Cannot reach the server. Is the utility running?'); })
+          .finally(function () { btn.disabled = false; btnText.textContent = 'Sign in'; });
+      });
+    })();
+  </script>
+</body>
+</html>

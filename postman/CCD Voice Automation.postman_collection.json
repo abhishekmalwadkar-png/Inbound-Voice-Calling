@@ -1,0 +1,1967 @@
+{
+  "info": {
+    "_postman_id": "80545996-8ab5-4027-a806-2f905add430c",
+    "name": "CCD Voice Automation - Utility Service",
+    "description": "All endpoints of the CCD (Card & Consignment Delivery) inbound voice bot utility service.\n\n**Folders**\n0. Health & dashboard auth\n1. Workflow APIs for AutomationEdge (JSON + `twiml`)\n2. Twilio webhooks, simulated with form-encoded Twilio fields\n3. Twilio REST call management\n4. Dashboard APIs (login first)\n\nEvery value is a variable. Import **CCD Voice - Local.postman_environment.json** and set `dashboardPassword` there.\nSeed data comes from `db/seed.sql` (`npm run db:init`).\n\n**Optional call settings** (any request; .env is the fallback):\n`voice`, `language`, `agentNumber` (alias `destination`), `callerId`, `dialTimeout`, `gatherTimeout`,\n`verifyTimeout`, `confidenceThreshold`, `deliveryWindow`, `baseUrl`, `menuActionUrl`, `verifyActionUrl`, `dialStatusUrl`.\nSettings sent with a `callSid` are remembered for the rest of that call.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Generate a workflow CallSid once per run when none is set.",
+          "if (!pm.variables.get('callSid')) {",
+          "  pm.collectionVariables.set('callSid', 'WFPM' + Date.now().toString(16) + Math.floor(Math.random() * 1e6).toString(16));",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8001",
+      "type": "string",
+      "description": "Service root. Use your ngrok / Nginx https URL when testing remotely."
+    },
+    {
+      "key": "callSid",
+      "value": "",
+      "type": "string",
+      "description": "Auto-generated per run if empty (WF...). Set a real Twilio CallSid to drive a live call."
+    },
+    {
+      "key": "callerPhone",
+      "value": "+919800000001",
+      "type": "string",
+      "description": "Recognised caller (seed: single Dispatched consignment)."
+    },
+    {
+      "key": "multiConsignmentPhone",
+      "value": "+919800000006",
+      "type": "string",
+      "description": "Seed number with two consignments."
+    },
+    {
+      "key": "unknownPhone",
+      "value": "+919999900006",
+      "type": "string",
+      "description": "Number not in the database."
+    },
+    {
+      "key": "consignmentId",
+      "value": "CCD1001",
+      "type": "string",
+      "description": "Consignment for Status requests (overwritten by Validate Caller)."
+    },
+    {
+      "key": "exceptionConsignmentId",
+      "value": "CCD1002",
+      "type": "string",
+      "description": "Consignment with a failed delivery attempt."
+    },
+    {
+      "key": "verifyConsignmentId",
+      "value": "CCD1008",
+      "type": "string",
+      "description": "Consignment number used for secondary verification."
+    },
+    {
+      "key": "verifyConsignmentDigits",
+      "value": "1008",
+      "type": "string",
+      "description": "Keypad form of the consignment number."
+    },
+    {
+      "key": "dob",
+      "value": "15081990",
+      "type": "string",
+      "description": "Date of birth (DDMMYYYY) for secondary verification."
+    },
+    {
+      "key": "invalidIdentifier",
+      "value": "CCD9999999",
+      "type": "string",
+      "description": "Identifier that never matches (failure scenarios)."
+    },
+    {
+      "key": "voice",
+      "value": "Polly.Kajal",
+      "type": "string",
+      "description": "Twilio <Say> voice."
+    },
+    {
+      "key": "language",
+      "value": "en-IN",
+      "type": "string",
+      "description": "Voice / speech recognition language."
+    },
+    {
+      "key": "agentNumber",
+      "value": "+919876543210",
+      "type": "string",
+      "description": "Live agent number or sip: URI."
+    },
+    {
+      "key": "twilioPhoneNumber",
+      "value": "+10000000000",
+      "type": "string",
+      "description": "Your Twilio number (caller ID / From)."
+    },
+    {
+      "key": "deliveryWindow",
+      "value": "10:00 AM and 6:00 PM",
+      "type": "string",
+      "description": "Spoken delivery window."
+    },
+    {
+      "key": "publicBaseUrl",
+      "value": "http://localhost:8001",
+      "type": "string",
+      "description": "Public URL Twilio should call back (TwiML action URLs)."
+    },
+    {
+      "key": "outboundTo",
+      "value": "+919800000001",
+      "type": "string",
+      "description": "Destination for Make Call."
+    },
+    {
+      "key": "twilioCallSid",
+      "value": "",
+      "type": "string",
+      "description": "Set by Make Call; used by Call Status / Terminate Call."
+    },
+    {
+      "key": "twilioSimCallSid",
+      "value": "",
+      "type": "string",
+      "description": "Simulated CallSid for the webhook folder (auto-generated)."
+    },
+    {
+      "key": "auditCallSid",
+      "value": "",
+      "type": "string",
+      "description": "Set by Audit Logs; used by Call Events."
+    },
+    {
+      "key": "dashboardUsername",
+      "value": "admin",
+      "type": "string",
+      "description": "Dashboard login."
+    },
+    {
+      "key": "dashboardPassword",
+      "value": "",
+      "type": "string",
+      "description": "Dashboard login password (set it in the environment, not the collection)."
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Health & Dashboard Auth",
+      "description": "Service health and dashboard sign-in. Postman keeps the session cookie automatically, so run **Login** before the Dashboard folder.",
+      "item": [
+        {
+          "name": "Health check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responds 200 or 503', () => pm.expect(pm.response.code).to.be.oneOf([200, 503]));",
+                  "pm.test('Has status field', () => pm.expect(pm.response.json()).to.have.property('status'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Returns `ok` when the service and PostgreSQL are reachable, `degraded` (503) otherwise. No login required."
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                  "pm.test('Session cookie set', () => pm.expect(pm.cookies.has('ccd_session')).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Signs in to the dashboard and sets the HttpOnly `ccd_session` cookie. 5 wrong attempts lock the IP for 5 minutes.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{dashboardUsername}}\",\n  \"password\": \"{{dashboardPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Who am I",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                  "pm.test('Username returned', () => pm.expect(body.username).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Returns the signed-in user. 401 when not signed in."
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Workflow APIs (AutomationEdge)",
+      "description": "Pure REST endpoints for workflow steps. Each returns structured JSON plus a ready-to-return `twiml` string.\n\n**Optional call settings** (any request; .env is the fallback):\n`voice`, `language`, `agentNumber` (alias `destination`), `callerId`, `dialTimeout`, `gatherTimeout`,\n`verifyTimeout`, `confidenceThreshold`, `deliveryWindow`, `baseUrl`, `menuActionUrl`, `verifyActionUrl`, `dialStatusUrl`.\nSettings sent with a `callSid` are remembered for the rest of that call.",
+      "item": [
+        {
+          "name": "Validate Caller (ANI)",
+          "item": [
+            {
+              "name": "Validate Caller - single consignment",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                      "",
+                      "pm.test('Returns TwiML', () => pm.expect(body.twiml).to.include('<Response>'));",
+                      "pm.test('No DOB / full PAN in payload', () => {",
+                      "  const s = JSON.stringify(body);",
+                      "  pm.expect(s).to.not.match(/\"dob\"/i);",
+                      "  pm.expect(s).to.not.match(/\\b\\d{13,19}\\b/);",
+                      "});",
+                      "",
+                      "pm.test('matchType present', () => pm.expect(body.matchType).to.be.oneOf(['SINGLE', 'MULTIPLE', 'NONE', 'ERROR']));",
+                      "if (body.consignments && body.consignments.length) pm.collectionVariables.set('consignmentId', body.consignments[0].consignmentId);"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/validate-caller",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "validate-caller"
+                  ]
+                },
+                "description": "Matches the caller's number against active consignments.\n\n**matchType**: `SINGLE` (go to menu), `MULTIPLE` (disambiguation), `NONE` (secondary verification).\n\n**Optional call settings** (any request; .env is the fallback):\n`voice`, `language`, `agentNumber` (alias `destination`), `callerId`, `dialTimeout`, `gatherTimeout`,\n`verifyTimeout`, `confidenceThreshold`, `deliveryWindow`, `baseUrl`, `menuActionUrl`, `verifyActionUrl`, `dialStatusUrl`.\nSettings sent with a `callSid` are remembered for the rest of that call.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"callerPhone\": \"{{callerPhone}}\",\n  \"callSid\": \"{{callSid}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Validate Caller - multiple consignments",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                      "pm.test('MULTIPLE match', () => pm.expect(body.matchType).to.eql('MULTIPLE'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/validate-caller",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "validate-caller"
+                  ]
+                },
+                "description": "Seed number with two active consignments: expect `matchType = MULTIPLE` and a \"Press 1 / Press 2\" menu.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"callerPhone\": \"{{multiConsignmentPhone}}\",\n  \"callSid\": \"{{callSid}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Validate Caller - unknown number",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                      "pm.test('NONE match', () => pm.expect(body.matchType).to.eql('NONE'));",
+                      "pm.test('Next action is secondary verification', () => pm.expect(body.nextAction).to.eql('SECONDARY_VERIFICATION'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/validate-caller",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "validate-caller"
+                  ]
+                },
+                "description": "Unrecognised number: expect `matchType = NONE` and a prompt for consignment number or DOB.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"callerPhone\": \"{{unknownPhone}}\",\n  \"callSid\": \"{{callSid}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Validate Caller - custom voice & agent settings",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                      "pm.test('TwiML uses requested voice', () => pm.expect(body.twiml).to.include('voice=\"' + pm.variables.get('voice') + '\"'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/validate-caller",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "validate-caller"
+                  ]
+                },
+                "description": "Shows every optional call setting. They are stored on the call (`callSid`) and reused by later Twilio callbacks.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"callerPhone\": \"{{callerPhone}}\",\n  \"callSid\": \"{{callSid}}\",\n  \"voice\": \"{{voice}}\",\n  \"language\": \"{{language}}\",\n  \"agentNumber\": \"{{agentNumber}}\",\n  \"callerId\": \"{{twilioPhoneNumber}}\",\n  \"gatherTimeout\": 5,\n  \"dialTimeout\": 30,\n  \"deliveryWindow\": \"{{deliveryWindow}}\",\n  \"baseUrl\": \"{{publicBaseUrl}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify Secondary ID",
+          "item": [
+            {
+              "name": "Verify - consignment number",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                      "",
+                      "pm.test('Returns TwiML', () => pm.expect(body.twiml).to.include('<Response>'));",
+                      "pm.test('No DOB / full PAN in payload', () => {",
+                      "  const s = JSON.stringify(body);",
+                      "  pm.expect(s).to.not.match(/\"dob\"/i);",
+                      "  pm.expect(s).to.not.match(/\\b\\d{13,19}\\b/);",
+                      "});",
+                      "pm.test('Verified', () => pm.expect(body.verified).to.eql(true));",
+                      "pm.test('Method CONSIGNMENT', () => pm.expect(body.validationMethod).to.eql('CONSIGNMENT'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/verify-secondary",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "verify-secondary"
+                  ]
+                },
+                "description": "Verifies with a consignment number (`CCD1008` or digits `1008`).\n\nReturns `verified`, `attemptCount`, `escalateToAgent`, `consignment` (masked), `twiml`.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"callSid\": \"{{callSid}}\",\n  \"identifier\": \"{{verifyConsignmentId}}\",\n  \"type\": \"CONSIGNMENT\",\n  \"attemptCount\": 1,\n  \"callerPhone\": \"{{unknownPhone}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Verify - date of birth",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                      "pm.test('Verified', () => pm.expect(body.verified).to.eql(true));",
+                      "pm.test('Method DOB', () => pm.expect(body.validationMethod).to.eql('DOB'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/verify-secondary",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "verify-secondary"
+                  ]
+                },
+                "description": "Verifies with DOB in `DDMMYYYY` (also accepts `15/08/1990` or `15th August 1990`). A DOB alone must match exactly one customer.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"callSid\": \"{{callSid}}\",\n  \"identifier\": \"{{dob}}\",\n  \"type\": \"DOB\",\n  \"attemptCount\": 1,\n  \"callerPhone\": \"{{unknownPhone}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Verify - failed attempt 1 (retry)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                      "pm.test('Not verified', () => pm.expect(body.verified).to.eql(false));",
+                      "pm.test('No escalation yet', () => pm.expect(body.escalateToAgent).to.eql(false));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/verify-secondary",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "verify-secondary"
+                  ]
+                },
+                "description": "First failure: `verified=false`, `escalateToAgent=false`, `nextAction=RETRY_VERIFICATION`, TwiML re-prompts.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"callSid\": \"{{callSid}}\",\n  \"identifier\": \"{{invalidIdentifier}}\",\n  \"type\": \"AUTO\",\n  \"attemptCount\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Verify - failed attempt 2 (escalate)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                      "pm.test('Escalates to agent', () => pm.expect(body.escalateToAgent).to.eql(true));",
+                      "pm.test('TwiML dials agent', () => pm.expect(body.twiml).to.include('<Dial'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/verify-secondary",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "verify-secondary"
+                  ]
+                },
+                "description": "Second failure: `escalateToAgent=true`, TwiML announces the security failure and `<Dial>`s the agent.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"callSid\": \"{{callSid}}\",\n  \"identifier\": \"{{invalidIdentifier}}\",\n  \"type\": \"AUTO\",\n  \"attemptCount\": 2\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consignment Status",
+          "item": [
+            {
+              "name": "Status - current status",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                      "",
+                      "pm.test('Returns TwiML', () => pm.expect(body.twiml).to.include('<Response>'));",
+                      "pm.test('No DOB / full PAN in payload', () => {",
+                      "  const s = JSON.stringify(body);",
+                      "  pm.expect(s).to.not.match(/\"dob\"/i);",
+                      "  pm.expect(s).to.not.match(/\\b\\d{13,19}\\b/);",
+                      "});",
+                      "pm.test('Has spokenText', () => pm.expect(body.spokenText).to.be.a('string').and.not.empty);",
+                      "pm.test('Card number masked', () => pm.expect(body.maskedNumber).to.match(/X+.*\\d{4}$/));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "status"
+                  ]
+                },
+                "description": "**intent**: `STATUS` | `EDD` | `EXCEPTION` | `ACTION`. Returns plain-language `spokenText` and follow-up TwiML. 404 if the consignment is unknown.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"consignmentId\": \"{{consignmentId}}\",\n  \"intent\": \"STATUS\",\n  \"callSid\": \"{{callSid}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Status - expected delivery date (EDD)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                      "pm.test('Intent EDD', () => pm.expect(body.intent).to.eql('EDD'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "status"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"consignmentId\": \"{{consignmentId}}\",\n  \"intent\": \"EDD\",\n  \"callSid\": \"{{callSid}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Status - next steps / photo ID (ACTION)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                      "pm.test('Mentions photo ID', () => pm.expect(body.spokenText).to.include('photo ID'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "status"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"consignmentId\": \"{{exceptionConsignmentId}}\",\n  \"intent\": \"ACTION\",\n  \"callSid\": \"{{callSid}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Status - unknown consignment (404)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                      "pm.test('Re-prompt TwiML returned', () => pm.expect(pm.response.json().twiml).to.include('<Gather'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "status"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"consignmentId\": \"CCD0000000\",\n  \"intent\": \"STATUS\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delivery Exception",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                  "",
+                  "pm.test('Returns TwiML', () => pm.expect(body.twiml).to.include('<Response>'));",
+                  "pm.test('No DOB / full PAN in payload', () => {",
+                  "  const s = JSON.stringify(body);",
+                  "  pm.expect(s).to.not.match(/\"dob\"/i);",
+                  "  pm.expect(s).to.not.match(/\\b\\d{13,19}\\b/);",
+                  "});",
+                  "",
+                  "pm.test('Has attempt fields', () => {",
+                  "  pm.expect(body).to.have.property('attemptTimestamp');",
+                  "  pm.expect(body).to.have.property('failureReason');",
+                  "  pm.expect(body).to.have.property('nextAttemptDate');",
+                  "  pm.expect(body.attemptHistory).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/workflow/exception",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workflow",
+                "exception"
+              ]
+            },
+            "description": "Attempt history, plain-language failure reason, next attempt date, delivery window and action required.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"consignmentId\": \"{{exceptionConsignmentId}}\",\n  \"callSid\": \"{{callSid}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Agent Transfer",
+          "item": [
+            {
+              "name": "Agent Transfer - customer request",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                      "",
+                      "pm.test('Returns TwiML', () => pm.expect(body.twiml).to.include('<Response>'));",
+                      "pm.test('No DOB / full PAN in payload', () => {",
+                      "  const s = JSON.stringify(body);",
+                      "  pm.expect(s).to.not.match(/\"dob\"/i);",
+                      "  pm.expect(s).to.not.match(/\\b\\d{13,19}\\b/);",
+                      "});",
+                      "pm.test('Action DIAL_AGENT', () => pm.expect(body.action).to.eql('DIAL_AGENT'));",
+                      "pm.test('TwiML dials', () => pm.expect(body.twiml).to.include('<Dial'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/agent-transfer",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "agent-transfer"
+                  ]
+                },
+                "description": "**reason**: any code (e.g. `CUSTOMER_REQUEST`, `2X_VERIFICATION_FAILURE`, `LOW_CONFIDENCE_OR_OUT_OF_SCOPE`). Stored upper-case in the audit log.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"callSid\": \"{{callSid}}\",\n  \"callerPhone\": \"{{callerPhone}}\",\n  \"reason\": \"CUSTOMER_REQUEST\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Agent Transfer - custom destination & message",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('success = true', () => pm.expect(body.success).to.eql(true));",
+                      "pm.test('Destination as requested', () => pm.expect(body.destination).to.eql(pm.variables.get('agentNumber')));",
+                      "pm.test('Dial timeout as requested', () => pm.expect(body.dialTimeoutSeconds).to.eql(20));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/workflow/agent-transfer",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "workflow",
+                    "agent-transfer"
+                  ]
+                },
+                "description": "Overrides the agent number, caller ID and ring timeout for this call and speaks a custom message first.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"callSid\": \"{{callSid}}\",\n  \"callerPhone\": \"{{callerPhone}}\",\n  \"reason\": \"2X_VERIFICATION_FAILURE\",\n  \"agentNumber\": \"{{agentNumber}}\",\n  \"callerId\": \"{{twilioPhoneNumber}}\",\n  \"dialTimeout\": 20,\n  \"message\": \"Connecting you to our priority desk.\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Twilio Webhooks (simulated)",
+      "description": "These are the URLs Twilio calls. Requests use Twilio's form-encoded fields so you can simulate a full call from Postman. Run them in order with the same `{{twilioSimCallSid}}`.\n\nCall settings can be added to any webhook URL as query parameters, e.g. `?voice=Polly.Aditi&agentNumber=%2B91...`.\n\nIf `TWILIO_VALIDATE_SIGNATURE=true`, these simulated requests are rejected (403).",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.collectionVariables.get('twilioSimCallSid')) {",
+              "  pm.collectionVariables.set('twilioSimCallSid', 'CAPM' + Array.from({ length: 30 }, () => Math.floor(Math.random() * 16).toString(16)).join(''));",
+              "}"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "Inbound Call (A Call Comes In)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is XML', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('xml'));",
+                  "const xml = pm.response.text();",
+                  "pm.test('Valid TwiML <Response>', () => pm.expect(xml).to.include('<Response>'));",
+                  "pm.test('Barge-in Gather', () => pm.expect(xml).to.match(/<Gather[^>]*bargeIn=\"true\"/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "CallSid",
+                  "value": "{{twilioSimCallSid}}",
+                  "type": "text"
+                },
+                {
+                  "key": "From",
+                  "value": "{{callerPhone}}",
+                  "type": "text"
+                },
+                {
+                  "key": "To",
+                  "value": "{{twilioPhoneNumber}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Direction",
+                  "value": "inbound",
+                  "type": "text"
+                },
+                {
+                  "key": "CallStatus",
+                  "value": "ringing",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/telephony/inbound-call",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "telephony",
+                "inbound-call"
+              ]
+            },
+            "description": "Configure this URL in the Twilio Console under **A Call Comes In (POST)**. Looks up the caller by `From` and returns the greeting TwiML."
+          }
+        },
+        {
+          "name": "Menu Selection - DTMF (press 1 = status)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is XML', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('xml'));",
+                  "const xml = pm.response.text();",
+                  "pm.test('Valid TwiML <Response>', () => pm.expect(xml).to.include('<Response>'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "CallSid",
+                  "value": "{{twilioSimCallSid}}",
+                  "type": "text"
+                },
+                {
+                  "key": "From",
+                  "value": "{{callerPhone}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Digits",
+                  "value": "1",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/telephony/menu-selection",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "telephony",
+                "menu-selection"
+              ]
+            },
+            "description": "Keypad: 1 status, 2 delivery date, 3 attempt history, 4 documents / next steps, 9 agent, 0 end call, * repeat menu."
+          }
+        },
+        {
+          "name": "Menu Selection - speech query",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is XML', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('xml'));",
+                  "const xml = pm.response.text();",
+                  "pm.test('Valid TwiML <Response>', () => pm.expect(xml).to.include('<Response>'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "CallSid",
+                  "value": "{{twilioSimCallSid}}",
+                  "type": "text"
+                },
+                {
+                  "key": "From",
+                  "value": "{{callerPhone}}",
+                  "type": "text"
+                },
+                {
+                  "key": "SpeechResult",
+                  "value": "Why wasn't my card delivered yesterday?",
+                  "type": "text"
+                },
+                {
+                  "key": "Confidence",
+                  "value": "0.92",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/telephony/menu-selection",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "telephony",
+                "menu-selection"
+              ]
+            },
+            "description": "Speech is classified into STATUS / EDD / EXCEPTION / ACTION / AGENT / RESCHEDULE / NO. `Confidence` below the threshold counts as unclear."
+          }
+        },
+        {
+          "name": "Menu Selection - silence (no input)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is XML', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('xml'));",
+                  "const xml = pm.response.text();",
+                  "pm.test('Valid TwiML <Response>', () => pm.expect(xml).to.include('<Response>'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "CallSid",
+                  "value": "{{twilioSimCallSid}}",
+                  "type": "text"
+                },
+                {
+                  "key": "From",
+                  "value": "{{callerPhone}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/telephony/menu-selection",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "telephony",
+                "menu-selection"
+              ]
+            },
+            "description": "Empty Gather result (caller said nothing). First time re-prompts; second time escalates (or ends the call politely at the follow-up question)."
+          }
+        },
+        {
+          "name": "Menu Selection - end call (say \"no\")",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is XML', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('xml'));",
+                  "const xml = pm.response.text();",
+                  "pm.test('Valid TwiML <Response>', () => pm.expect(xml).to.include('<Response>'));",
+                  "pm.test('Hangs up', () => pm.expect(xml).to.include('<Hangup'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "CallSid",
+                  "value": "{{twilioSimCallSid}}",
+                  "type": "text"
+                },
+                {
+                  "key": "From",
+                  "value": "{{callerPhone}}",
+                  "type": "text"
+                },
+                {
+                  "key": "SpeechResult",
+                  "value": "No thanks",
+                  "type": "text"
+                },
+                {
+                  "key": "Confidence",
+                  "value": "0.9",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/telephony/menu-selection",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "telephony",
+                "menu-selection"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Verify Input - consignment number",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is XML', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('xml'));",
+                  "const xml = pm.response.text();",
+                  "pm.test('Valid TwiML <Response>', () => pm.expect(xml).to.include('<Response>'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "CallSid",
+                  "value": "{{twilioSimCallSid}}",
+                  "type": "text"
+                },
+                {
+                  "key": "From",
+                  "value": "{{unknownPhone}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Digits",
+                  "value": "{{verifyConsignmentDigits}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/telephony/verify-input",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "telephony",
+                "verify-input"
+              ]
+            },
+            "description": "Gather action for secondary verification. Send `Digits` (keypad) or `SpeechResult` (spoken). Two failures escalate to an agent."
+          }
+        },
+        {
+          "name": "Verify Input - spoken date of birth",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is XML', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('xml'));",
+                  "const xml = pm.response.text();",
+                  "pm.test('Valid TwiML <Response>', () => pm.expect(xml).to.include('<Response>'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "CallSid",
+                  "value": "{{twilioSimCallSid}}",
+                  "type": "text"
+                },
+                {
+                  "key": "From",
+                  "value": "{{unknownPhone}}",
+                  "type": "text"
+                },
+                {
+                  "key": "SpeechResult",
+                  "value": "15th August 1990",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/telephony/verify-input",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "telephony",
+                "verify-input"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Agent Dial Status - busy (fallback)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type is XML', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('xml'));",
+                  "const xml = pm.response.text();",
+                  "pm.test('Valid TwiML <Response>', () => pm.expect(xml).to.include('<Response>'));",
+                  "pm.test('Busy message', () => pm.expect(xml).to.include('All agents are currently busy'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "CallSid",
+                  "value": "{{twilioSimCallSid}}",
+                  "type": "text"
+                },
+                {
+                  "key": "DialCallStatus",
+                  "value": "busy",
+                  "type": "text"
+                },
+                {
+                  "key": "DialCallDuration",
+                  "value": "0",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/telephony/agent-dial-status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "telephony",
+                "agent-dial-status"
+              ]
+            },
+            "description": "`<Dial action>` callback. `busy`, `no-answer`, `failed` or `canceled` play \"All agents are currently busy\" and hang up; `completed` just hangs up."
+          }
+        },
+        {
+          "name": "Status Callback (call completed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 204', () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.unset('twilioSimCallSid');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "CallSid",
+                  "value": "{{twilioSimCallSid}}",
+                  "type": "text"
+                },
+                {
+                  "key": "From",
+                  "value": "{{callerPhone}}",
+                  "type": "text"
+                },
+                {
+                  "key": "CallStatus",
+                  "value": "completed",
+                  "type": "text"
+                },
+                {
+                  "key": "CallDuration",
+                  "value": "64",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/telephony/status-callback",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "telephony",
+                "status-callback"
+              ]
+            },
+            "description": "Configure under **Call Status Changes (POST)** in Twilio. Records final duration and marks unfinished calls as ABANDONED. Clears `twilioSimCallSid` so the next run starts a new call."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Call Management (Twilio REST)",
+      "description": "Uses the Twilio REST API with the credentials in .env. Needs real `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` and a Twilio number.",
+      "item": [
+        {
+          "name": "Make Call",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created (or Twilio/config error)', () => pm.expect(pm.response.code).to.be.oneOf([201, 400, 401, 502, 503]));",
+                  "const body = pm.response.json();",
+                  "if (pm.response.code === 201) pm.collectionVariables.set('twilioCallSid', body.callSid);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/telephony/make-call",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "telephony",
+                "make-call"
+              ]
+            },
+            "description": "Places a call via `client.calls.create`.\n\n- `to` (required, E.164)\n- `from` (default TWILIO_PHONE_NUMBER)\n- `actionUrl` (default: this service's inbound-call webhook; call settings are appended as query parameters)\n- `method`, `statusCallback`, `statusCallbackMethod`, `statusCallbackEvent`, `timeout` (5-600), `record`, `machineDetection`\n\nEmpty strings fall back to defaults.\n\n**Optional call settings** (any request; .env is the fallback):\n`voice`, `language`, `agentNumber` (alias `destination`), `callerId`, `dialTimeout`, `gatherTimeout`,\n`verifyTimeout`, `confidenceThreshold`, `deliveryWindow`, `baseUrl`, `menuActionUrl`, `verifyActionUrl`, `dialStatusUrl`.\nSettings sent with a `callSid` are remembered for the rest of that call.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to\": \"{{outboundTo}}\",\n  \"from\": \"{{twilioPhoneNumber}}\",\n  \"actionUrl\": \"\",\n  \"method\": \"POST\",\n  \"statusCallback\": \"\",\n  \"statusCallbackEvent\": [\n    \"initiated\",\n    \"ringing\",\n    \"answered\",\n    \"completed\"\n  ],\n  \"timeout\": 30,\n  \"record\": false,\n  \"voice\": \"{{voice}}\",\n  \"language\": \"{{language}}\",\n  \"agentNumber\": \"{{agentNumber}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Call Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responds', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 404, 502, 503]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/telephony/call-status/{{twilioCallSid}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "telephony",
+                "call-status",
+                "{{twilioCallSid}}"
+              ]
+            },
+            "description": "Live status (`queued`, `ringing`, `in-progress`, `completed`...), duration and timestamps for a real Twilio CallSid (`CA` + 32 hex). `twilioCallSid` is filled in by **Make Call**."
+          }
+        },
+        {
+          "name": "Terminate Call",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responds', () => pm.expect(pm.response.code).to.be.oneOf([200, 400, 404, 502, 503]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/telephony/terminate-call",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "telephony",
+                "terminate-call"
+              ]
+            },
+            "description": "Ends an active call (`status: completed`).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"callSid\": \"{{twilioCallSid}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Dashboard APIs (login required)",
+      "description": "Run **0. Health & Dashboard Auth / Login** first (running the whole collection does this automatically). Without the session cookie these return 401. **Logout** is the last request.",
+      "item": [
+        {
+          "name": "KPI Metrics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has KPIs', () => pm.expect(body.kpis).to.include.keys('containmentRate', 'totalCalls', 'averageHandlingTimeSeconds', 'validationAccuracy', 'escalationRate', 'estimatedCostSavingsInr'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "metrics"
+              ]
+            },
+            "description": "Containment rate, total calls, AHT, validation accuracy, escalation rate, cost savings, plus chart data."
+          }
+        },
+        {
+          "name": "Audit Logs (filtered, paginated)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Paged shape', () => { pm.expect(body.rows).to.be.an('array'); pm.expect(body.total).to.be.a('number'); });",
+                  "if (body.rows.length) pm.collectionVariables.set('auditCallSid', body.rows[0].callSid);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/audit-logs?limit=50&offset=0&q=&from=&to=&disposition=&validation=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "audit-logs"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                },
+                {
+                  "key": "q",
+                  "value": ""
+                },
+                {
+                  "key": "from",
+                  "value": ""
+                },
+                {
+                  "key": "to",
+                  "value": ""
+                },
+                {
+                  "key": "disposition",
+                  "value": ""
+                },
+                {
+                  "key": "validation",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Query: `limit` (1-200), `offset`, `q` (search), `from` / `to` (YYYY-MM-DD), `disposition` (BOT_RESOLVED, CALLER_ENDED, AGENT_TRANSFERRED, AGENT_UNAVAILABLE, ABANDONED, IN_PROGRESS), `validation` (ANI, ANI_MULTI, CONSIGNMENT, DOB, FAILED, WORKFLOW). Caller numbers are masked."
+          }
+        },
+        {
+          "name": "Audit Logs - Download CSV",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('CSV content type', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv'));",
+                  "pm.test('Attachment', () => pm.expect(pm.response.headers.get('Content-Disposition')).to.include('attachment'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/audit-logs/export.csv?q=&from=&to=&disposition=&validation=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "audit-logs",
+                "export.csv"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": ""
+                },
+                {
+                  "key": "from",
+                  "value": ""
+                },
+                {
+                  "key": "to",
+                  "value": ""
+                },
+                {
+                  "key": "disposition",
+                  "value": ""
+                },
+                {
+                  "key": "validation",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Same filters as Audit Logs; up to 50,000 rows. In Postman use **Send and Download** to save the file."
+          }
+        },
+        {
+          "name": "Call Events (per-call trail)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Array of events', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/calls/{{auditCallSid}}/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "calls",
+                "{{auditCallSid}}",
+                "events"
+              ]
+            },
+            "description": "Turn-by-turn events for one call (intents, verification results, escalation). `auditCallSid` is set by **Audit Logs**."
+          }
+        },
+        {
+          "name": "Logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Clears the dashboard session cookie. Requests in this folder return 401 afterwards until you Login again."
+          }
+        }
+      ]
+    }
+  ]
+}
